@@ -14,10 +14,11 @@ from pathlib import Path
 
 import paramiko
 
+from build_info import BUILD_VERSION as VERSION
+from updater import check_for_update, start_update
+
 APP_NAME = "FinalSSH"
-VERSION = "0.2.0"
 REPO = "dincer552/Finalssh"
-API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 BG = "#111318"
 PANEL = "#191d25"
 FIELD = "#222834"
@@ -107,9 +108,16 @@ class FinalSSH:
         self.cf_runtime = None
         self.connected = False
         self.closing = False
+        self._update_check_running = False
+        self._update_available = False
+        self._update_button = None
+        self._manual_update_button = None
+        self._update_build_label = None
+        self._update_running = False
         self._build_ui()
         self._load_settings()
         self.root.after(80, self._process_events)
+        self.root.after(2000, self._schedule_update_check)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
     def _build_ui(self):
@@ -122,6 +130,13 @@ class FinalSSH:
         style.map("Connect.TButton", background=[("active", "#3979e8")])
         style.configure("TEntry", fieldbackground=FIELD, foreground=TEXT, insertcolor=TEXT, padding=8)
         style.configure("Status.TLabel", foreground=MUTED, font=("Segoe UI", 9))
+        style.configure("UpdateBuild.TLabel", background=PANEL, foreground="#16a34a",
+                        font=("Segoe UI", 7, "bold"))
+        style.configure("CompactUpdate.TButton", background="#1a56db", foreground="#ffffff",
+                        font=("Segoe UI", 8, "bold"), borderwidth=0, padding=(7, 2))
+        style.map("CompactUpdate.TButton",
+                  background=[("active", "#1e40af"), ("disabled", "#cbd5e1")])
+        style.configure("CheckUpdate.TButton", font=("Segoe UI", 8), padding=(7, 3))
 
         header = tk.Frame(self.root, bg=PANEL, height=58)
         header.pack(fill="x")
@@ -131,7 +146,27 @@ class FinalSSH:
         self.version_label = tk.Label(header, text=f"v{VERSION}", bg=PANEL, fg=MUTED,
                                       font=("Segoe UI", 9))
         self.version_label.pack(side="left", pady=5)
-        ttk.Button(header, text="Güncellemeleri kontrol et", command=self.check_updates).pack(side="right", padx=16)
+        update_controls = tk.Frame(header, bg=PANEL)
+        update_controls.pack(side="right", padx=12, pady=5)
+
+        self._manual_update_button = ttk.Button(
+            update_controls, text="↻ Denetle", style="CheckUpdate.TButton",
+            command=self._manual_update_check, width=9
+        )
+        self._manual_update_button.pack(side="left", padx=(0, 6), anchor="n")
+
+        update_stack = tk.Frame(update_controls, bg=PANEL)
+        update_stack.pack(side="left", anchor="n")
+        self._update_button = ttk.Button(
+            update_stack, text="Güncelle", style="CompactUpdate.TButton",
+            command=self._start_update, width=10, state="disabled"
+        )
+        self._update_button.pack(side="top", fill="x")
+        self._update_build_label = ttk.Label(
+            update_stack, text="", style="UpdateBuild.TLabel",
+            anchor="center", state="disabled"
+        )
+        self._update_build_label.pack(side="top", fill="x", pady=(1, 0))
 
         self.login = tk.Frame(self.root, bg=BG, padx=22, pady=18)
         self.login.pack(fill="x")
@@ -546,66 +581,70 @@ class FinalSSH:
         self.footer_status.configure(text="Hazır")
         self._write(f"\n[{message}]\n")
 
-    def check_updates(self):
-        self.footer_status.configure(text="Güncellemeler kontrol ediliyor...")
-        threading.Thread(target=self._check_updates_worker, daemon=True).start()
-
-    def _check_updates_worker(self):
-        try:
-            request = urllib.request.Request(API_URL, headers={"User-Agent": APP_NAME})
-            with urllib.request.urlopen(request, timeout=12) as response:
-                release = json.loads(response.read().decode("utf-8"))
-            latest = release.get("tag_name", "").lstrip("v")
-            if not latest:
-                raise RuntimeError("GitHub sürüm etiketi bulunamadı.")
-            def version_key(value):
-                parts = []
-                for part in value.split("."):
-                    digits = "".join(ch for ch in part if ch.isdigit())
-                    parts.append(int(digits) if digits else 0)
-                return tuple(parts)
-
-            if version_key(latest) <= version_key(VERSION):
-                self.events.put(("update", "current", release))
-            else:
-                self.events.put(("update", "available", release))
-        except Exception as exc:
-            self.events.put(("update", "error", str(exc)))
-
-    def _install_update(self, release):
-        assets = release.get("assets", [])
-        asset = next((a for a in assets if a.get("name", "").lower().endswith(".exe")), None)
-        if not asset:
-            webbrowser.open(release.get("html_url", f"https://github.com/{REPO}/releases"))
+    def _schedule_update_check(self):
+        if self.closing:
             return
-        if not getattr(sys, "frozen", False):
-            messagebox.showinfo("Güncelleme", "Kaynak kod modundasınız. Yeni sürümü GitHub Releases sayfasından alın.")
-            webbrowser.open(release.get("html_url", ""))
-            return
-        threading.Thread(target=self._download_update, args=(asset,), daemon=True).start()
+        self._check_for_update_async()
+        self.root.after(2 * 60 * 1000, self._schedule_update_check)
 
-    def _download_update(self, asset):
-        try:
-            req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": APP_NAME})
-            with urllib.request.urlopen(req, timeout=60) as response:
-                data = response.read()
-            current = Path(sys.executable).resolve()
-            temp_exe = Path(os.environ.get("TEMP", str(current.parent))) / "FinalSSH-update.exe"
-            temp_exe.write_bytes(data)
-            bat = temp_exe.with_suffix(".bat")
-            script = (
-                "@echo off\r\n"
-                "timeout /t 2 /nobreak >nul\r\n"
-                f'copy /y "{temp_exe}" "{current}" >nul\r\n'
-                f'start "" "{current}"\r\n'
-                f'del "{temp_exe}"\r\n'
-                'del "%~f0"\r\n'
-            )
-            bat.write_text(script, encoding="utf-8")
-            os.startfile(str(bat))
-            self.root.after(0, self.close)
-        except Exception as exc:
-            self.events.put(("output", f"\n[Güncelleme hatası: {exc}]\n"))
+    def _check_for_update_async(self, manual=False):
+        if self._update_check_running or self._update_running:
+            return
+        self._update_check_running = True
+
+        def worker():
+            update = None
+            available = False
+            error = None
+            try:
+                update = check_for_update()
+                available = bool(update.get("available"))
+            except Exception as exc:
+                error = str(exc)
+
+            def apply():
+                self._update_check_running = False
+                self._update_available = available
+                if self._update_button is not None:
+                    self._update_button.configure(
+                        text="Güncelle",
+                        state="normal" if available else "disabled"
+                    )
+                if self._update_build_label is not None:
+                    if available and update:
+                        version = str(update.get("version") or "").strip().lstrip("vV")
+                        self._update_build_label.configure(
+                            text=f"Yeni: v{version}" if version else "Yeni sürüm mevcut",
+                            state="normal"
+                        )
+                    else:
+                        self._update_build_label.configure(text="", state="disabled")
+                if self._manual_update_button is not None:
+                    self._manual_update_button.configure(state="normal")
+                if manual:
+                    if error:
+                        messagebox.showerror("Güncelleme denetimi", error, parent=self.root)
+                    elif not available:
+                        messagebox.showinfo("Güncelleme", f"FinalSSH v{VERSION} güncel.", parent=self.root)
+            if not self.closing:
+                self.root.after(0, apply)
+
+        if self._manual_update_button is not None:
+            self._manual_update_button.configure(state="disabled")
+        if self._update_button is not None and not self._update_available:
+            self._update_button.configure(text="Kontrol...", state="disabled")
+        threading.Thread(target=worker, name="finalssh-update-check", daemon=True).start()
+
+    def _manual_update_check(self):
+        if self._update_check_running or self._update_running:
+            return
+        self._check_for_update_async(manual=True)
+
+    def _start_update(self):
+        if not self._update_available or self._update_running:
+            return
+        start_update(self.root, self._update_button)
+
 
     def close(self):
         self._save_settings()
