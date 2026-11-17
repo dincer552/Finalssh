@@ -263,10 +263,17 @@ class FinalSSH:
     def _terminal_key(self, event):
         if not self.connected or not self.channel:
             return "break"
-        if event.state & 0x4 and event.keysym.lower() in ("c", "v"):
-            if event.keysym.lower() == "c":
+        if event.state & 0x4 and event.keysym.lower() == "c":
+            if event.state & 0x1:
                 return None
-            return None
+            try:
+                self.channel.send(b"\x03")
+            except Exception:
+                pass
+            return "break"
+        if event.state & 0x4 and event.keysym.lower() == "v":
+            self._paste(None)
+            return "break"
         mapping = {"Return": "\r", "BackSpace": "\x7f", "Tab": "\t",
                    "Up": "\x1b[A", "Down": "\x1b[B", "Right": "\x1b[C",
                    "Left": "\x1b[D", "Home": "\x1b[H", "End": "\x1b[F",
