@@ -92,3 +92,8 @@ Güncelleme, TEST KONTROL uygulamasındaki gibi 2 MiB'lık küçük parçalar ha
 
 İndirme tamamlandığında geçici bir PowerShell betiği çalışan uygulamanın kapanmasını bekler, yeni EXE'yi mevcut dosyanın yerine koyar ve FinalSSH'yi otomatik yeniden başlatır. Kullanıcıya BAT dosyası oluşturulmaz veya gösterilmez.
 
+
+
+## Üçüncü taraf bileşen
+
+FinalSSH, QudsLab / Cloudflared projesinin Windows AMD64 DLL sürümünü paketler. Ayrıntılar ve lisans bilgileri için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) ve [Apache-2.0 lisansı](THIRD_PARTY_LICENSES/Apache-2.0.txt) dosyalarına bakın.
