@@ -225,6 +225,19 @@ class FinalSSH:
                     self._set_status("● Bağlantı hatası", RED)
                     self.footer_status.configure(text="Bağlantı başarısız")
                     self.connect_btn.configure(state="normal")
+                elif kind == "update":
+                    _, status, payload = event
+                    if status == "current":
+                        self.footer_status.configure(text="En güncel sürüm kullanılıyor")
+                        messagebox.showinfo("Güncelleme", f"FinalSSH v{VERSION} güncel.")
+                    elif status == "available":
+                        self.footer_status.configure(text=f"Yeni sürüm: {payload.get('tag_name')}")
+                        if messagebox.askyesno("Yeni sürüm bulundu",
+                            f"Yeni sürüm {payload.get('tag_name')} bulundu.\\nŞimdi güncellensin mi?"):
+                            self._install_update(payload)
+                    else:
+                        self.footer_status.configure(text="Güncelleme kontrolü başarısız")
+                        messagebox.showerror("Güncelleme", payload)
         except queue.Empty:
             pass
         if not self.closing:
@@ -369,29 +382,4 @@ class FinalSSH:
 if __name__ == "__main__":
     root = tk.Tk()
     app = FinalSSH(root)
-    def handle_event():
-        try:
-            while True:
-                event = app.events.get_nowait()
-                if event[0] == "update":
-                    _, status, payload = event
-                    if status == "current":
-                        app.footer_status.configure(text="En güncel sürüm kullanılıyor")
-                        messagebox.showinfo("Güncelleme", f"FinalSSH v{VERSION} güncel.")
-                    elif status == "available":
-                        app.footer_status.configure(text=f"Yeni sürüm: {payload.get('tag_name')}")
-                        if messagebox.askyesno("Yeni sürüm bulundu",
-                            f"Yeni sürüm {payload.get('tag_name')} bulundu.\nŞimdi güncellensin mi?"):
-                            app._install_update(payload)
-                    else:
-                        app.footer_status.configure(text="Güncelleme kontrolü başarısız")
-                        messagebox.showerror("Güncelleme", payload)
-                else:
-                    app.events.put(event)
-                    break
-        except queue.Empty:
-            pass
-        if not app.closing:
-            root.after(150, handle_event)
-    root.after(150, handle_event)
     root.mainloop()
