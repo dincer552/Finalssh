@@ -37,14 +37,20 @@ def app_dir():
 
 
 def find_cloudflared():
-    found = shutil.which("cloudflared")
-    if found:
-        return found
-    candidates = [app_dir() / "cloudflared.exe", Path(sys.executable).parent / "cloudflared.exe"]
+    # PyInstaller --onefile extracts bundled files into _MEIPASS at runtime.
+    bundled_dir = getattr(sys, "_MEIPASS", None)
+    candidates = []
+    if bundled_dir:
+        candidates.append(Path(bundled_dir) / "cloudflared.exe")
+    candidates.extend([
+        app_dir() / "cloudflared.exe",
+        Path(sys.executable).parent / "cloudflared.exe",
+    ])
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
-    return None
+    # Keep PATH fallback for developers running from source or custom installs.
+    return shutil.which("cloudflared")
 
 
 class TrustOnFirstUse(paramiko.MissingHostKeyPolicy):
@@ -126,7 +132,7 @@ class FinalSSH:
         self.cf_frame = tk.Frame(self.login, bg=BG)
         self.cf_id = self._field(self.cf_frame, "Access Client ID (isteğe bağlı)", "", 0)
         self.cf_secret = self._field(self.cf_frame, "Access Client Secret (isteğe bağlı)", "", 1, show="•")
-        tk.Label(self.cf_frame, text="cloudflared kurulu olmalı • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
+        tk.Label(self.cf_frame, text="cloudflared uygulamaya dahildir • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
                  bg=BG, fg=MUTED, font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7,0))
         self.connect_btn = ttk.Button(self.login, text="Bağlan", style="Connect.TButton", command=self.connect)
         self.connect_btn.pack(anchor="e", pady=(12, 0))
@@ -236,8 +242,8 @@ class FinalSSH:
         cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
         cf_secret = self.cf_secret.get().strip() if mode == "Cloudflare Tunnel" else ""
         if mode == "Cloudflare Tunnel" and not find_cloudflared():
-            messagebox.showerror("cloudflared bulunamadı",
-                "Cloudflare Tunnel bağlantısı için cloudflared Windows istemcisini kurun ve PATH'e ekleyin.")
+            messagebox.showerror("Cloudflare bileşeni bulunamadı",
+                "Bu pakette cloudflared.exe bulunamadı. Uygulamayı GitHub Releases üzerinden yeniden indirin.")
             return
         self.connect_btn.configure(state="disabled")
         self._set_status("● Bağlanıyor...", ACCENT)
@@ -256,7 +262,7 @@ class FinalSSH:
             if mode == "Cloudflare Tunnel":
                 cloudflared = find_cloudflared()
                 if not cloudflared:
-                    raise RuntimeError("cloudflared.exe bulunamadı. Kurup PATH'e ekleyin.")
+                    raise RuntimeError("Uygulama içindeki cloudflared.exe bulunamadı. FinalSSH paketini yeniden indirin.")
                 command_parts = [cloudflared, "access", "ssh", "--hostname", host]
                 if bool(cf_id) != bool(cf_secret):
                     raise RuntimeError("Client ID ve Client Secret birlikte girilmelidir.")
