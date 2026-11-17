@@ -58,27 +58,7 @@ jobs:
       - name: Smoke test QudsLab DLL exports
         shell: pwsh
         run: |
-          @'
-          import ctypes
-          from pathlib import Path
-
-          dll_path = Path("cloudflared-windows-amd64.dll").resolve()
-          lib = ctypes.CDLL(str(dll_path))
-          lib.CloudflaredInit.argtypes = []
-          lib.CloudflaredInit.restype = ctypes.c_int
-          lib.CloudflaredStop.argtypes = []
-          lib.CloudflaredStop.restype = ctypes.c_int
-          lib.CloudflaredVersion.argtypes = []
-          lib.CloudflaredVersion.restype = ctypes.c_char_p
-
-          version = lib.CloudflaredVersion()
-          assert version, "CloudflaredVersion returned an empty value"
-          init_result = lib.CloudflaredInit()
-          assert init_result == 0, f"CloudflaredInit returned {init_result}"
-          stop_result = lib.CloudflaredStop()
-          assert stop_result == 0, f"CloudflaredStop returned {stop_result}"
-          print("QudsLab Cloudflared DLL loaded; version:", version.decode("utf-8", "replace"))
-          '@ | python -
+          python -c "import ctypes,pathlib; p=pathlib.Path('cloudflared-windows-amd64.dll').resolve(); lib=ctypes.CDLL(str(p)); lib.CloudflaredInit.argtypes=[]; lib.CloudflaredInit.restype=ctypes.c_int; lib.CloudflaredStop.argtypes=[]; lib.CloudflaredStop.restype=ctypes.c_int; lib.CloudflaredVersion.restype=ctypes.c_char_p; v=lib.CloudflaredVersion(); assert v; i=lib.CloudflaredInit(); assert i == 0, i; r=lib.CloudflaredStop(); assert r == 0, r; print('QudsLab DLL loaded; version:', v.decode('utf-8','replace'))"
 
 
       - name: Build single-file Windows executable
