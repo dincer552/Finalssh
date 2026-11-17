@@ -11,7 +11,7 @@ import subprocess
 import urllib.request
 import webbrowser
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
 
 import paramiko
@@ -105,8 +105,17 @@ class FinalSSH:
         self.host = self._field(fields, "IP / Hostname", "192.168.1.100", 0)
         self.port = self._field(fields, "Port", "22", 1)
         self.username = self._field(fields, "Kullanıcı adı", "root", 2)
-        self.password = self._field(fields, "Şifre", "", 3, show="•")
-        self.password.bind("<Return>", lambda _e: self.connect())
+        key_block = tk.Frame(fields, bg=BG)
+        key_block.grid(row=0, column=3, sticky="ew", padx=(0, 12))
+        fields.grid_columnconfigure(3, weight=2)
+        tk.Label(key_block, text="SSH Private Key (PEM / OpenSSH)", bg=BG, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 5))
+        key_row = tk.Frame(key_block, bg=BG)
+        key_row.pack(fill="x")
+        self.key_path = ttk.Entry(key_row)
+        self.key_path.pack(side="left", fill="x", expand=True)
+        ttk.Button(key_row, text="Dosya seç", command=self._browse_key).pack(side="left", padx=(6, 0))
+        self.key_path.bind("<Return>", lambda _e: self.connect())
 
         mode_row = tk.Frame(self.login, bg=BG)
         mode_row.pack(fill="x", pady=(12, 0))
@@ -154,12 +163,22 @@ class FinalSSH:
         footer = tk.Frame(self.root, bg=PANEL, height=30)
         footer.pack(fill="x", side="bottom")
         footer.pack_propagate(False)
-        tk.Label(footer, text="Şifreler diske kaydedilmez  •  Paramiko SSH",
+        tk.Label(footer, text="SSH private key kullanılır • Anahtar dosyası diske kopyalanmaz",
                  bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(side="left", padx=12)
         self.footer_status = tk.Label(footer, text="Hazır", bg=PANEL, fg=MUTED,
                                       font=("Segoe UI", 8))
         self.footer_status.pack(side="right", padx=12)
         self._write("FinalSSH hazır. Bağlanmak için sunucu bilgilerini girin.\n")
+
+    def _browse_key(self):
+        path = filedialog.askopenfilename(
+            title="SSH private key dosyasını seçin",
+            filetypes=[("SSH key files", "*.pem *.key *.ppk"), ("All files", "*.*")],
+            parent=self.root
+        )
+        if path:
+            self.key_path.delete(0, "end")
+            self.key_path.insert(0, path)
 
     def _mode_changed(self, _event=None):
         if self.connection_mode.get() == "Cloudflare Tunnel":
@@ -205,13 +224,16 @@ class FinalSSH:
             return
         host = self.host.get().strip()
         user = self.username.get().strip()
-        secret = self.password.get()
+        key_path = self.key_path.get().strip()
         try:
             port = int(self.port.get().strip())
-            if not host or not user or not (1 <= port <= 65535):
+            if not host or not user or not key_path or not (1 <= port <= 65535):
                 raise ValueError()
+            if not Path(key_path).is_file():
+                messagebox.showerror("SSH anahtarı bulunamadı", "Geçerli bir private key dosyası seçin.")
+                return
         except ValueError:
-            messagebox.showerror("Bilgi eksik", "Geçerli IP/Host, port ve kullanıcı adı girin.")
+            messagebox.showerror("Bilgi eksik", "IP/Host, port, kullanıcı adı ve PEM/OpenSSH private key dosyası seçin.")
             return
         mode = self.connection_mode.get()
         cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
@@ -224,9 +246,9 @@ class FinalSSH:
         self._set_status("● Bağlanıyor...", ACCENT)
         self._write(f"\n[{host}:{port}] {mode} bağlantısı kuruluyor...\n")
         threading.Thread(target=self._connect_worker,
-                         args=(host, port, user, secret, mode, cf_id, cf_secret), daemon=True).start()
+                         args=(host, port, user, key_path, mode, cf_id, cf_secret), daemon=True).start()
 
-    def _connect_worker(self, host, port, user, secret, mode="Normal SSH", cf_id="", cf_secret=""):
+    def _connect_worker(self, host, port, user, key_path, mode="Normal SSH", cf_id="", cf_secret=""):
         client = paramiko.SSHClient()
         known = Path.home() / ".finalssh" / "known_hosts"
         if known.exists():
@@ -261,12 +283,12 @@ class FinalSSH:
                     else:
                         os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = old_secret
                 client.connect(hostname=host, port=port, username=user,
-                               password=secret or None, sock=proxy, timeout=25,
+                               key_filename=key_path, sock=proxy, timeout=25,
                                banner_timeout=25, auth_timeout=20,
                                look_for_keys=True, allow_agent=True)
             else:
                 client.connect(hostname=host, port=port, username=user,
-                               password=secret or None, timeout=12, banner_timeout=12,
+                               key_filename=key_path, timeout=12, banner_timeout=12,
                                auth_timeout=15, look_for_keys=True, allow_agent=True)
             channel = client.invoke_shell(term="xterm-256color", width=120, height=32)
             channel.settimeout(0.0)
