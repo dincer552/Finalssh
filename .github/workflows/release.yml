@@ -39,8 +39,29 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q main.py
 
+      - name: Download official Cloudflare Tunnel client
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $headers = @{
+            "User-Agent" = "FinalSSH-Build"
+            "Accept" = "application/vnd.github+json"
+            "Authorization" = "Bearer $env:GITHUB_TOKEN"
+          }
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/cloudflare/cloudflared/releases/latest" -Headers $headers
+          $asset = $release.assets | Where-Object { $_.name -eq "cloudflared-windows-amd64.exe" } | Select-Object -First 1
+          if (-not $asset) {
+            throw "Official cloudflared Windows AMD64 release asset was not found."
+          }
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "cloudflared.exe"
+          if ((Get-Item "cloudflared.exe").Length -lt 1MB) {
+            throw "Downloaded cloudflared.exe is unexpectedly small."
+          }
+          Write-Host "Bundling cloudflared release $($release.tag_name)"
+
       - name: Build Windows executable
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH main.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared.exe;." main.py
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
