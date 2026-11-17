@@ -233,7 +233,7 @@ class FinalSSH:
                     elif status == "available":
                         self.footer_status.configure(text=f"Yeni sürüm: {payload.get('tag_name')}")
                         if messagebox.askyesno("Yeni sürüm bulundu",
-                            f"Yeni sürüm {payload.get('tag_name')} bulundu.\\nŞimdi güncellensin mi?"):
+                            f"Yeni sürüm {payload.get('tag_name')} bulundu.\nŞimdi güncellensin mi?"):
                             self._install_update(payload)
                     else:
                         self.footer_status.configure(text="Güncelleme kontrolü başarısız")
