@@ -37,19 +37,16 @@ def app_dir():
 
 
 def find_cloudflared():
-    # PyInstaller --onefile extracts bundled files into _MEIPASS at runtime.
-    bundled_dir = getattr(sys, "_MEIPASS", None)
-    candidates = []
-    if bundled_dir:
-        candidates.append(Path(bundled_dir) / "cloudflared.exe")
-    candidates.extend([
-        app_dir() / "cloudflared.exe",
-        Path(sys.executable).parent / "cloudflared.exe",
-    ])
-    for candidate in candidates:
-        if candidate.is_file():
-            return str(candidate)
-    # Keep PATH fallback for developers running from source or custom installs.
+    # A released one-file EXE must use only the binary embedded at build time.
+    # PyInstaller exposes bundled resources from its private runtime directory.
+    if getattr(sys, "frozen", False):
+        bundled_dir = getattr(sys, "_MEIPASS", None)
+        if not bundled_dir:
+            return None
+        embedded_client = Path(bundled_dir) / "cloudflared.exe"
+        return str(embedded_client) if embedded_client.is_file() else None
+
+    # Source/developer runs may use a locally installed official client.
     return shutil.which("cloudflared")
 
 
