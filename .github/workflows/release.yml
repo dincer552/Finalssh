@@ -30,10 +30,12 @@ jobs:
         run: |
           $version = "0.2.$env:GITHUB_RUN_NUMBER"
           "version=$version" >> $env:GITHUB_OUTPUT
-          $path = "main.py"
-          $source = Get-Content $path -Raw
-          $source = [regex]::Replace($source, 'VERSION = ".*?"', ('VERSION = "' + $version + '"'), 1)
-          Set-Content -Path $path -Value $source -Encoding utf8
+          Set-Content -Path build_info.py -Value @(
+            '"""Build metadata embedded in FinalSSH."""'
+            ('BUILD_VERSION = "' + $version + '"')
+            ('BUILD_SHA = "' + $env:GITHUB_SHA + '"')
+          ) -Encoding UTF8
+          python -c "import build_info; assert build_info.BUILD_VERSION == '$version'; print(build_info.BUILD_VERSION, build_info.BUILD_SHA)"
 
       - name: Install dependencies
         run: |
@@ -41,7 +43,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Check Python syntax
-        run: python -m compileall -q main.py
+        run: python -m compileall -q main.py updater.py build_info.py
 
       - name: Download and verify QudsLab Cloudflared DLL
         shell: pwsh
@@ -69,6 +71,31 @@ jobs:
         run: |
           Compress-Archive -Path "dist/FinalSSH.exe" -DestinationPath "dist/FinalSSH.zip" -Force
 
+      - name: Split latest EXE into 2 MiB update parts
+        shell: pwsh
+        run: |
+          $chunkSize = 2MB
+          $buffer = New-Object byte[] $chunkSize
+          $inputStream = [System.IO.File]::OpenRead("dist/FinalSSH.exe")
+          $index = 0
+          try {
+            while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
+              $partName = "dist/FinalSSH_latest.part{0:D3}" -f $index
+              $outputStream = [System.IO.File]::Create($partName)
+              try {
+                $outputStream.Write($buffer, 0, $read)
+              } finally {
+                $outputStream.Dispose()
+              }
+              Write-Host "Created $partName ($read bytes)"
+              $index++
+            }
+          } finally {
+            $inputStream.Dispose()
+          }
+          if ($index -eq 0) { throw "No update parts were generated." }
+          Write-Host "Created $index update parts."
+
       - name: Upload ZIP to GitHub Actions artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -89,3 +116,4 @@ jobs:
           files: |
             dist/FinalSSH.exe
             dist/FinalSSH.zip
+            dist/FinalSSH_latest.part*
