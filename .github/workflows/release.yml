@@ -74,6 +74,14 @@ jobs:
         run: |
           Compress-Archive -Path "dist/FinalSSH.exe" -DestinationPath "dist/FinalSSH.zip" -Force
 
+      - name: Upload ZIP to GitHub Actions artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: FinalSSH-${{ steps.version.outputs.version }}
+          path: dist/FinalSSH.zip
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
