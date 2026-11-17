@@ -173,7 +173,7 @@ class FinalSSH:
     def _browse_key(self):
         path = filedialog.askopenfilename(
             title="SSH private key dosyasını seçin",
-            filetypes=[("SSH key files", "*.pem *.key *.ppk"), ("All files", "*.*")],
+            filetypes=[("SSH key files", "*.pem *.key"), ("All files", "*.*")],
             parent=self.root
         )
         if path:
