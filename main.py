@@ -5,6 +5,9 @@ import time
 import queue
 import socket
 import threading
+import shutil
+import shlex
+import subprocess
 import urllib.request
 import webbrowser
 import tkinter as tk
@@ -14,7 +17,7 @@ from pathlib import Path
 import paramiko
 
 APP_NAME = "FinalSSH"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 REPO = "dincer552/Finalssh"
 API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 BG = "#111318"
@@ -93,6 +96,21 @@ class FinalSSH:
         self.username = self._field(fields, "Kullanıcı adı", "root", 2)
         self.password = self._field(fields, "Şifre", "", 3, show="•")
         self.password.bind("<Return>", lambda _e: self.connect())
+
+        mode_row = tk.Frame(self.login, bg=BG)
+        mode_row.pack(fill="x", pady=(12, 0))
+        tk.Label(mode_row, text="Bağlantı türü", bg=BG, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(0, 10))
+        self.connection_mode = ttk.Combobox(mode_row, state="readonly",
+                    values=["Normal SSH", "Cloudflare Tunnel"], width=22)
+        self.connection_mode.current(0)
+        self.connection_mode.pack(side="left")
+        self.connection_mode.bind("<<ComboboxSelected>>", self._mode_changed)
+        self.cf_frame = tk.Frame(self.login, bg=BG)
+        self.cf_id = self._field(self.cf_frame, "Access Client ID (isteğe bağlı)", "", 0)
+        self.cf_secret = self._field(self.cf_frame, "Access Client Secret (isteğe bağlı)", "", 1, show="•")
+        tk.Label(self.cf_frame, text="cloudflared kurulu olmalı • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7,0))
         self.connect_btn = ttk.Button(self.login, text="Bağlan", style="Connect.TButton", command=self.connect)
         self.connect_btn.pack(anchor="e", pady=(12, 0))
 
@@ -131,6 +149,12 @@ class FinalSSH:
                                       font=("Segoe UI", 8))
         self.footer_status.pack(side="right", padx=12)
         self._write("FinalSSH hazır. Bağlanmak için sunucu bilgilerini girin.\n")
+
+    def _mode_changed(self, _event=None):
+        if self.connection_mode.get() == "Cloudflare Tunnel":
+            self.cf_frame.pack(fill="x", pady=(8, 0), before=self.connect_btn)
+        else:
+            self.cf_frame.pack_forget()
 
     def _field(self, parent, label, value, column, show=None):
         block = tk.Frame(parent, bg=BG)
@@ -178,27 +202,54 @@ class FinalSSH:
         except ValueError:
             messagebox.showerror("Bilgi eksik", "Geçerli IP/Host, port ve kullanıcı adı girin.")
             return
+        mode = self.connection_mode.get()
+        cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
+        cf_secret = self.cf_secret.get().strip() if mode == "Cloudflare Tunnel" else ""
+        if mode == "Cloudflare Tunnel" and not shutil.which("cloudflared"):
+            messagebox.showerror("cloudflared bulunamadı",
+                "Cloudflare Tunnel bağlantısı için cloudflared Windows istemcisini kurun ve PATH'e ekleyin.")
+            return
         self.connect_btn.configure(state="disabled")
         self._set_status("● Bağlanıyor...", ACCENT)
-        self._write(f"\n[{host}:{port}] Bağlantı kuruluyor...\n")
+        self._write(f"\n[{host}:{port}] {mode} bağlantısı kuruluyor...\n")
         threading.Thread(target=self._connect_worker,
-                         args=(host, port, user, secret), daemon=True).start()
+                         args=(host, port, user, secret, mode, cf_id, cf_secret), daemon=True).start()
 
-    def _connect_worker(self, host, port, user, secret):
+    def _connect_worker(self, host, port, user, secret, mode="Normal SSH", cf_id="", cf_secret=""):
         client = paramiko.SSHClient()
         known = Path.home() / ".finalssh" / "known_hosts"
         if known.exists():
             client.load_host_keys(str(known))
         client.set_missing_host_key_policy(TrustOnFirstUse(self._ask_host_key))
+        proxy = None
         try:
-            client.connect(hostname=host, port=port, username=user,
-                           password=secret or None, timeout=12, banner_timeout=12,
-                           auth_timeout=15, look_for_keys=True, allow_agent=True)
+            if mode == "Cloudflare Tunnel":
+                cloudflared = shutil.which("cloudflared")
+                if not cloudflared:
+                    raise RuntimeError("cloudflared.exe bulunamadı. Kurup PATH'e ekleyin.")
+                command_parts = [cloudflared, "access", "ssh", "--hostname", host]
+                if cf_id and cf_secret:
+                    command_parts += ["--service-token-id", cf_id,
+                                      "--service-token-secret", cf_secret]
+                elif bool(cf_id) != bool(cf_secret):
+                    raise RuntimeError("Client ID ve Client Secret birlikte girilmelidir.")
+                command = subprocess.list2cmdline(command_parts) if os.name == "nt" else shlex.join(command_parts)
+                proxy = paramiko.ProxyCommand(command)
+                client.connect(hostname=host, port=port, username=user,
+                               password=secret or None, sock=proxy, timeout=25,
+                               banner_timeout=25, auth_timeout=20,
+                               look_for_keys=True, allow_agent=True)
+            else:
+                client.connect(hostname=host, port=port, username=user,
+                               password=secret or None, timeout=12, banner_timeout=12,
+                               auth_timeout=15, look_for_keys=True, allow_agent=True)
             channel = client.invoke_shell(term="xterm-256color", width=120, height=32)
             channel.settimeout(0.0)
             self.events.put(("connected", client, channel, host, user))
         except Exception as exc:
             client.close()
+            if proxy:
+                proxy.close()
             self.events.put(("error", f"Bağlantı kurulamadı: {exc}"))
 
     def _process_events(self):
