@@ -228,13 +228,27 @@ class FinalSSH:
                 if not cloudflared:
                     raise RuntimeError("cloudflared.exe bulunamadı. Kurup PATH'e ekleyin.")
                 command_parts = [cloudflared, "access", "ssh", "--hostname", host]
-                if cf_id and cf_secret:
-                    command_parts += ["--service-token-id", cf_id,
-                                      "--service-token-secret", cf_secret]
-                elif bool(cf_id) != bool(cf_secret):
+                if bool(cf_id) != bool(cf_secret):
                     raise RuntimeError("Client ID ve Client Secret birlikte girilmelidir.")
                 command = subprocess.list2cmdline(command_parts) if os.name == "nt" else shlex.join(command_parts)
-                proxy = paramiko.ProxyCommand(command)
+                # cloudflared reads service tokens from its environment; do not expose
+                # the secret in command-line arguments or persist it to disk.
+                old_id = os.environ.get("TUNNEL_SERVICE_TOKEN_ID")
+                old_secret = os.environ.get("TUNNEL_SERVICE_TOKEN_SECRET")
+                try:
+                    if cf_id and cf_secret:
+                        os.environ["TUNNEL_SERVICE_TOKEN_ID"] = cf_id
+                        os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = cf_secret
+                    proxy = paramiko.ProxyCommand(command)
+                finally:
+                    if old_id is None:
+                        os.environ.pop("TUNNEL_SERVICE_TOKEN_ID", None)
+                    else:
+                        os.environ["TUNNEL_SERVICE_TOKEN_ID"] = old_id
+                    if old_secret is None:
+                        os.environ.pop("TUNNEL_SERVICE_TOKEN_SECRET", None)
+                    else:
+                        os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = old_secret
                 client.connect(hostname=host, port=port, username=user,
                                password=secret or None, sock=proxy, timeout=25,
                                banner_timeout=25, auth_timeout=20,
