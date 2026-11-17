@@ -119,13 +119,10 @@ class FinalSSH:
 
         mode_row = tk.Frame(self.login, bg=BG)
         mode_row.pack(fill="x", pady=(12, 0))
-        tk.Label(mode_row, text="Bağlantı türü", bg=BG, fg=MUTED,
-                 font=("Segoe UI", 9)).pack(side="left", padx=(0, 10))
-        self.connection_mode = ttk.Combobox(mode_row, state="readonly",
-                    values=["Normal SSH", "Cloudflare Tunnel"], width=22)
-        self.connection_mode.current(0)
-        self.connection_mode.pack(side="left")
-        self.connection_mode.bind("<<ComboboxSelected>>", self._mode_changed)
+        self.cloudflare_enabled = tk.BooleanVar(value=False)
+        ttk.Checkbutton(mode_row, text="Cloudflare Tunnel kullan",
+                        variable=self.cloudflare_enabled,
+                        command=self._mode_changed).pack(side="left")
         self.cf_frame = tk.Frame(self.login, bg=BG)
         self.cf_id = self._field(self.cf_frame, "Access Client ID (isteğe bağlı)", "", 0)
         self.cf_secret = self._field(self.cf_frame, "Access Client Secret (isteğe bağlı)", "", 1, show="•")
@@ -181,7 +178,7 @@ class FinalSSH:
             self.key_path.insert(0, path)
 
     def _mode_changed(self, _event=None):
-        if self.connection_mode.get() == "Cloudflare Tunnel":
+        if self.cloudflare_enabled.get():
             self.cf_frame.pack(fill="x", pady=(8, 0), before=self.connect_btn)
         else:
             self.cf_frame.pack_forget()
@@ -235,7 +232,7 @@ class FinalSSH:
         except ValueError:
             messagebox.showerror("Bilgi eksik", "IP/Host, port, kullanıcı adı ve PEM/OpenSSH private key dosyası seçin.")
             return
-        mode = self.connection_mode.get()
+        mode = "Cloudflare Tunnel" if self.cloudflare_enabled.get() else "Normal SSH"
         cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
         cf_secret = self.cf_secret.get().strip() if mode == "Cloudflare Tunnel" else ""
         if mode == "Cloudflare Tunnel" and not find_cloudflared():
