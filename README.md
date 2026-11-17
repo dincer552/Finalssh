@@ -18,7 +18,7 @@ python main.py
 ```
 
 ## Build locally
-Run `build.bat`. The executable is written to `dist\FinalSSH.exe`.
+Run `build.bat`. The script downloads the official Windows AMD64 `cloudflared` client and embeds it in the single-file executable. The executable is written to `dist\FinalSSH.exe`.
 
 ## Download and automatic updates
 
@@ -33,11 +33,13 @@ GitHub Actions assigns each build a higher version automatically. The updater co
 
 The app also supports SSH through a Cloudflare Tunnel protected by Cloudflare Access.
 
-1. Install the Windows `cloudflared` client from [Cloudflare's official installation guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), or place `cloudflared.exe` next to `FinalSSH.exe` (PATH is also supported).
-2. In Cloudflare Zero Trust, publish the SSH hostname and route it to the VM SSH service (commonly `localhost:22` on the tunnel host).
-3. Configure a Cloudflare Access application/policy for that hostname.
-4. In FinalSSH choose **Cloudflare Tunnel**, enter the public Access hostname (for example `ssh.example.com`) in Host/IP, and enter the Linux SSH username and select your PEM/OpenSSH private key file.
+1. The packaged Windows EXE already contains the official `cloudflared.exe` client. No separate Cloudflare client installation is required.
+2. In Cloudflare Zero Trust, create a Tunnel and publish the SSH hostname, routing it to the VM SSH service (commonly `localhost:22` on the tunnel host).
+3. Configure a Cloudflare Access application and policy for that hostname.
+4. In FinalSSH tick **Cloudflare Tunnel kullan**, enter the public Access hostname (for example `ssh.example.com`) in Host/IP, then enter the Linux SSH username and select your PEM/OpenSSH private key file.
 5. Leave both Access token fields empty for browser-based Access login, or enter both a Service Token Client ID and Client Secret for a Service Auth policy.
+
+FinalSSH bundles the Cloudflare client, but it does not create a Cloudflare account, Tunnel, DNS hostname, or Access policy for you. Those are configured once in your Cloudflare Zero Trust dashboard.
 
 The Client ID and Client Secret are passed to the `cloudflared` child process through environment variables and are not saved by FinalSSH or exposed as command-line arguments. The SSH private key is used for VM authentication; the app does not ask for the VM account password. Cloudflare Tunnel's published route determines the origin SSH port (commonly 22); the port field is used for direct SSH connections.
 
