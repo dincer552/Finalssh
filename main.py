@@ -588,7 +588,7 @@ class FinalSSH:
         self.root.after(2 * 60 * 1000, self._schedule_update_check)
 
     def _check_for_update_async(self, manual=False):
-        if self._update_check_running or self._update_running:
+        if self._update_check_running or getattr(self.root, "_update_running", False):
             return
         self._update_check_running = True
 
