@@ -17,8 +17,8 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-## Build locally
-Run `build.bat`. The script downloads the official Windows AMD64 `cloudflared` client and embeds it in the single-file executable. The executable is written to `dist\FinalSSH.exe`.
+## Build
+Official Windows builds are produced by GitHub Actions and published as a single `FinalSSH.exe` in Releases. The release pipeline downloads the official Windows AMD64 `cloudflared` client, verifies its SHA256 digest against GitHub release metadata, and embeds it in the executable.
 
 ## Download and automatic updates
 
@@ -33,7 +33,7 @@ GitHub Actions assigns each build a higher version automatically. The updater co
 
 The app also supports SSH through a Cloudflare Tunnel protected by Cloudflare Access.
 
-1. The packaged Windows EXE already contains the official `cloudflared.exe` client. No separate Cloudflare client installation is required.
+1. The packaged Windows EXE already contains the official `cloudflared` client. No separate Cloudflare client installation, command prompt, batch file, or manual extraction is required from the user.
 2. In Cloudflare Zero Trust, create a Tunnel and publish the SSH hostname, routing it to the VM SSH service (commonly `localhost:22` on the tunnel host).
 3. Configure a Cloudflare Access application and policy for that hostname.
 4. In FinalSSH tick **Cloudflare Tunnel kullan**, enter the public Access hostname (for example `ssh.example.com`) in Host/IP, then enter the Linux SSH username and select your PEM/OpenSSH private key file.
