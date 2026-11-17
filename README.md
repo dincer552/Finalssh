@@ -10,6 +10,7 @@ FinalSSH, Windows için tek dosyalık bir SSH masaüstü istemcisidir. Python, T
 - İlk bağlantıda sunucu host-key parmak izi onayı; onaylanan anahtarlar `~/.finalssh/known_hosts` konumunda saklanır.
 - Tek bir **Cloudflare Tunnel kullan** kutucuğu: kapalıyken normal SSH, açıkken Cloudflare Access üzerinden SSH.
 - Cloudflare Access tarayıcı tabanlı oturum açma veya Service Token (Client ID + Client Secret) desteği.
+- QudsLab Cloudflared DLL, Python `ctypes` üzerinden doğrudan çağrılır; ayrı `cloudflared.exe` süreci başlatılmaz.
 - Uygulama içinden GitHub Releases güncelleme kontrolü ve EXE güncellemesi.
 - Sürüm numarası GitHub Actions tarafından otomatik oluşturulur.
 
@@ -21,7 +22,7 @@ FinalSSH, Windows için tek dosyalık bir SSH masaüstü istemcisidir. Python, T
 3. SSH sunucu bilgilerinizi ve private key dosyanızı seçin.
 4. Normal SSH için Cloudflare kutucuğunu boş bırakın. Cloudflare bağlantısı için **Cloudflare Tunnel kullan** kutucuğunu işaretleyin.
 
-**Kullanıcı bilgisayarına ayrıca Python, Paramiko, cloudflared, BAT dosyası veya başka bir Cloudflare programı kurmak gerekmez.** Resmî Windows AMD64 `cloudflared` istemcisi yayımlanan tek dosyalık EXE'nin içine paketlenir. PyInstaller tek dosya uygulamayı başlatırken bu gömülü bileşeni kendi geçici çalışma alanına açar; kullanıcıdan ayrı bir dosya seçmesi veya elle çıkarması istenmez.
+**Kullanıcı bilgisayarına ayrıca Python, Paramiko, `cloudflared.exe`, DLL veya başka bir Cloudflare programı kurmak gerekmez.** QudsLab projesinin Windows AMD64 Cloudflared DLL'si tek dosyalık EXE'nin içine paketlenir. PyInstaller başlatma sırasında DLL'yi kendi özel geçici çalışma alanına çıkarır ve Python `ctypes` ile yükler; kullanıcı ayrı bir dosya görmez veya elle çıkarmaz.
 
 ## Cloudflare Tunnel ilk yapılandırması
 
@@ -34,14 +35,15 @@ Uygulama Cloudflare istemcisini içerir; ancak bir Cloudflare hesabı veya sunuc
 5. Linux kullanıcı adınızı ve PEM/OpenSSH private key dosyanızı seçin.
 6. Tarayıcı üzerinden Access oturumu açmak için Service Token alanlarını boş bırakın. Service Auth politikası kullanıyorsanız Client ID ve Client Secret alanlarının ikisini de doldurun.
 
-Cloudflare Tunnel'ın yayınlanan rotası hedef SSH portunu belirler (genellikle 22). Port alanı doğrudan SSH bağlantısında kullanılır. Cloudflare seçeneği açıkken bağlantı, uygulama içine gömülmüş `cloudflared` istemcisi üzerinden kurulur.
+Cloudflare Tunnel'ın yayınlanan rotası hedef SSH portunu belirler (genellikle 22). Port alanı SSH sunucusunun portudur. Cloudflare seçeneği açıkken gömülü DLL, `access ssh` komutunu uygulama süreci içinde çalıştırır ve yalnızca `127.0.0.1` üzerinde geçici bir yerel TCP dinleyicisi açar. Paramiko bu yerel sokete bağlanır; SSH trafiği Cloudflare Access üzerinden taşınır.
 
 ## Güvenlik notları
 
 - SSH private key dosyası uygulama klasörüne kopyalanmaz; Paramiko'ya seçilen dosyanın yolu verilir.
 - SSH sunucu parolası istenmez veya kaydedilmez.
 - İlk bağlantıda sunucu anahtarının parmak izi kullanıcıya gösterilir; yalnızca onaylanırsa kaydedilir.
-- Service Token bilgileri diske yazılmaz; cloudflared alt sürecine ortam değişkenleri üzerinden aktarılır, komut satırı argümanlarına eklenmez.
+- Service Token bilgileri diske yazılmaz ve komut satırı argümanlarına konmaz; DLL çalışırken yalnızca uygulama sürecinin ortam değişkenlerinde tutulur ve tünel durdurulduğunda önceki ortam değerleri geri yüklenir.
+- Yerel yönlendirici sadece `127.0.0.1` adresinde dinler; LAN veya genel ağa açılmaz.
 - Yalnızca erişim yetkiniz olan sunuculara bağlanın.
 
 ## Otomatik derleme ve sürüm yayımlama
@@ -50,12 +52,20 @@ GitHub Actions, `main` veya `master` dalına her push işleminde (ya da elle ba�
 
 Derleme akışı:
 
-1. Cloudflare'ın resmî `cloudflared` GitHub Releases kaynağından Windows AMD64 istemcisini alır.
-2. GitHub Releases API'sinin sağladığı SHA-256 özetiyle indirilen dosyayı doğrular. Özet uyuşmazsa derlemeyi durdurur.
-3. Doğrulanan istemciyi PyInstaller kullanarak `FinalSSH.exe` içine ekler.
-4. Sürüm numarasını otomatik artırır, `FinalSSH.exe` dosyasını ZIP içine alır ve hem EXE'yi hem `FinalSSH.zip` arşivini GitHub Release'e yükler.
+1. QudsLab / Cloudflared projesinin sabitlenmiş Windows AMD64 DLL sürümünü indirir.
+2. İndirilen DLL'nin SHA-256 özetini doğrular; uyuşmazlıkta derlemeyi durdurur.
+3. DLL dışa aktarımlarını Windows üzerinde `ctypes` ile yükleyip başlatma/durdurma smoke testini çalıştırır.
+4. Doğrulanan DLL'yi PyInstaller ile `FinalSSH.exe` içine ekler.
+5. Sürüm numarasını otomatik artırır, `FinalSSH.exe` dosyasını ZIP içine alır ve hem EXE'yi hem `FinalSSH.zip` arşivini GitHub Release'e yükler.
 
-Kullanıcıya ayrı bir `build.bat` veya Cloudflare kurulum paketi dağıtılmaz. Yerel geliştirici çalıştırması için aşağıdaki kaynak kod adımları geçerlidir; Cloudflare özelliği kaynak kod modunda çalıştırılırken sistemde `cloudflared` bulunmalıdır.
+Actions çalıştırması ayrıca `FinalSSH-<version>` adlı ZIP artifact'i üretir. Kullanıcıya ayrı bir `cloudflared.exe`, DLL veya kurulum paketi dağıtılmaz.
+
+## Cloudflare DLL kaynağı
+
+FinalSSH, [QudsLab / Cloudflared](https://github.com/QudsLab/Cloudflared) projesinin C uyumlu DLL API'sini kullanır. Python, `CloudflaredInit`, `CloudflaredRun` ve `CloudflaredStop` fonksiyonlarını `ctypes` üzerinden çağırır. Bağlantı, `access ssh --url 127.0.0.1:<port>` yerel dinleyicisi üzerinden Paramiko'ya aktarılır.
+
+Kaynak modunda çalıştırmak için Windows AMD64 `cloudflared-windows-amd64.dll` dosyasını `vendor/` klasörüne koyun. Dağıtım EXE'sinde DLL zaten gömülüdür.
+
 
 ## Kaynak koddan çalıştırma
 
@@ -68,7 +78,7 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-Kaynak kod modunda doğrudan SSH için cloudflared gerekmez. Cloudflare Tunnel özelliği için resmî cloudflared istemcisini kurup PATH'e ekleyin.
+Kaynak kod modunda doğrudan SSH için Cloudflare DLL gerekmez. Cloudflare Tunnel özelliğini geliştirme ortamında denemek için QudsLab DLL'sini `vendor/cloudflared-windows-amd64.dll` konumuna koyun.
 
 ## Güncelleme
 
