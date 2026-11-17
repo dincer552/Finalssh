@@ -69,6 +69,11 @@ jobs:
       - name: Build single-file Windows executable
         run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared.exe;." main.py
 
+      - name: Create ZIP package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/FinalSSH.exe" -DestinationPath "dist/FinalSSH.zip" -Force
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -78,4 +83,6 @@ jobs:
           generate_release_notes: true
           make_latest: true
           overwrite_files: true
-          files: dist/FinalSSH.exe
+          files: |
+            dist/FinalSSH.exe
+            dist/FinalSSH.zip
