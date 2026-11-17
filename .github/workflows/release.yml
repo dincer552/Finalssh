@@ -43,37 +43,19 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q main.py
 
-      - name: Download official Cloudflare Tunnel client
+      - name: Download and verify official Cloudflare client
         shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $headers = @{
             "User-Agent" = "FinalSSH-Build"
             "Accept" = "application/vnd.github+json"
-            "Authorization" = "Bearer $env:GITHUB_TOKEN"
           }
           $release = Invoke-RestMethod -Uri "https://api.github.com/repos/cloudflare/cloudflared/releases/latest" -Headers $headers
           $asset = $release.assets | Where-Object { $_.name -eq "cloudflared-windows-amd64.exe" } | Select-Object -First 1
           if (-not $asset) {
             throw "Official cloudflared Windows AMD64 release asset was not found."
           }
-          if ($asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})
-
-      - name: Build Windows executable
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared.exe;." main.py
-
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: FinalSSH v${{ steps.version.outputs.version }}
-          target_commitish: ${{ github.sha }}
-          generate_release_notes: true
-          make_latest: true
-          overwrite_files: true
-          files: dist/FinalSSH.exe
-) {
+          if ($asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
             throw "GitHub did not provide a SHA256 digest for the official cloudflared binary."
           }
           $expectedHash = $Matches[1].ToLowerInvariant()
@@ -82,9 +64,9 @@ jobs:
           if ($actualHash -ne $expectedHash) {
             throw "cloudflared SHA256 verification failed. Expected $expectedHash, got $actualHash"
           }
-          Write-Host "Verified and bundling official cloudflared release $($release.tag_name) (SHA256 $actualHash)"
+          Write-Host "Verified official cloudflared $($release.tag_name), SHA256: $actualHash"
 
-      - name: Build Windows executable
+      - name: Build single-file Windows executable
         run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared.exe;." main.py
 
       - name: Publish GitHub Release
