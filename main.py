@@ -432,8 +432,6 @@ class FinalSSH:
             messagebox.showinfo("Güncelleme", "Kaynak kod modundasınız. Yeni sürümü GitHub Releases sayfasından alın.")
             webbrowser.open(release.get("html_url", ""))
             return
-        if not messagebox.askyesno("Güncelleme", "Yeni sürüm indirilsin ve uygulama güncellensin?"):
-            return
         threading.Thread(target=self._download_update, args=(asset,), daemon=True).start()
 
     def _download_update(self, asset):
