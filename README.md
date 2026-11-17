@@ -15,7 +15,8 @@ FinalSSH, Windows için tek dosyalık bir SSH masaüstü istemcisidir. Python, T
 
 ## Kullanıcı için kurulum
 
-1. [GitHub Releases](https://github.com/dincer552/Finalssh/releases/latest) sayfasından `FinalSSH.exe` dosyasını indirin.
+1. [GitHub Releases](https://github.com/dincer552/Finalssh/releases/latest) sayfasından doğrudan `FinalSSH.exe` dosyasını veya ZIP içinden `FinalSSH.exe` dosyasını indirin.
+   - `FinalSSH.zip` arşivinin içinde yalnızca `FinalSSH.exe` bulunur.
 2. EXE'yi çift tıklayarak çalıştırın.
 3. SSH sunucu bilgilerinizi ve private key dosyanızı seçin.
 4. Normal SSH için Cloudflare kutucuğunu boş bırakın. Cloudflare bağlantısı için **Cloudflare Tunnel kullan** kutucuğunu işaretleyin.
@@ -52,7 +53,7 @@ Derleme akışı:
 1. Cloudflare'ın resmî `cloudflared` GitHub Releases kaynağından Windows AMD64 istemcisini alır.
 2. GitHub Releases API'sinin sağladığı SHA-256 özetiyle indirilen dosyayı doğrular. Özet uyuşmazsa derlemeyi durdurur.
 3. Doğrulanan istemciyi PyInstaller kullanarak `FinalSSH.exe` içine ekler.
-4. Sürüm numarasını otomatik artırır ve tek EXE dosyasını GitHub Release'e yükler.
+4. Sürüm numarasını otomatik artırır, `FinalSSH.exe` dosyasını ZIP içine alır ve hem EXE'yi hem `FinalSSH.zip` arşivini GitHub Release'e yükler.
 
 Kullanıcıya ayrı bir `build.bat` veya Cloudflare kurulum paketi dağıtılmaz. Yerel geliştirici çalıştırması için aşağıdaki kaynak kod adımları geçerlidir; Cloudflare özelliği kaynak kod modunda çalıştırılırken sistemde `cloudflared` bulunmalıdır.
 
