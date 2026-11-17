@@ -408,7 +408,14 @@ class FinalSSH:
             latest = release.get("tag_name", "").lstrip("v")
             if not latest:
                 raise RuntimeError("GitHub sürüm etiketi bulunamadı.")
-            if latest == VERSION:
+            def version_key(value):
+                parts = []
+                for part in value.split("."):
+                    digits = "".join(ch for ch in part if ch.isdigit())
+                    parts.append(int(digits) if digits else 0)
+                return tuple(parts)
+
+            if version_key(latest) <= version_key(VERSION):
                 self.events.put(("update", "current", release))
             else:
                 self.events.put(("update", "available", release))
