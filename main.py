@@ -102,7 +102,7 @@ class FinalSSH:
         self.login.pack(fill="x")
         fields = tk.Frame(self.login, bg=BG)
         fields.pack(fill="x")
-        self.host = self._field(fields, "IP / Host", "192.168.1.100", 0)
+        self.host = self._field(fields, "IP / Hostname", "192.168.1.100", 0)
         self.port = self._field(fields, "Port", "22", 1)
         self.username = self._field(fields, "Kullanıcı adı", "root", 2)
         self.password = self._field(fields, "Şifre", "", 3, show="•")
