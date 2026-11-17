@@ -1,0 +1,397 @@
+import os
+import sys
+import json
+import time
+import queue
+import socket
+import threading
+import urllib.request
+import webbrowser
+import tkinter as tk
+from tkinter import ttk, messagebox
+from pathlib import Path
+
+import paramiko
+
+APP_NAME = "FinalSSH"
+VERSION = "0.1.0"
+REPO = "dincer552/Finalssh"
+API_URL = f"https://api.github.com/repos/{REPO}/releases/latest"
+BG = "#111318"
+PANEL = "#191d25"
+FIELD = "#222834"
+TEXT = "#e7eaf0"
+MUTED = "#9aa4b2"
+ACCENT = "#4f8cff"
+GREEN = "#38c98b"
+RED = "#ff647c"
+
+
+def app_dir():
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent
+
+
+class TrustOnFirstUse(paramiko.MissingHostKeyPolicy):
+    def __init__(self, callback):
+        self.callback = callback
+
+    def missing_host_key(self, client, hostname, key):
+        accepted = self.callback(hostname, key.get_name(), key.get_fingerprint().hex(":"))
+        if not accepted:
+            raise paramiko.SSHException("Sunucu anahtarı kullanıcı tarafından reddedildi.")
+        client.get_host_keys().add(hostname, key.get_name(), key)
+        known = Path.home() / ".finalssh" / "known_hosts"
+        known.parent.mkdir(parents=True, exist_ok=True)
+        client.save_host_keys(str(known))
+
+
+class FinalSSH:
+    def __init__(self, root):
+        self.root = root
+        self.root.title(f"{APP_NAME}  v{VERSION}")
+        self.root.geometry("1000x680")
+        self.root.minsize(760, 500)
+        self.root.configure(bg=BG)
+        self.events = queue.Queue()
+        self.client = None
+        self.channel = None
+        self.connected = False
+        self.closing = False
+        self._build_ui()
+        self.root.after(80, self._process_events)
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+
+    def _build_ui(self):
+        style = ttk.Style()
+        style.theme_use("clam")
+        style.configure("TFrame", background=BG)
+        style.configure("TLabel", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=(14, 8))
+        style.configure("Connect.TButton", background=ACCENT, foreground="white")
+        style.map("Connect.TButton", background=[("active", "#3979e8")])
+        style.configure("TEntry", fieldbackground=FIELD, foreground=TEXT, insertcolor=TEXT, padding=8)
+        style.configure("Status.TLabel", foreground=MUTED, font=("Segoe UI", 9))
+
+        header = tk.Frame(self.root, bg=PANEL, height=58)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+        tk.Label(header, text="FinalSSH", bg=PANEL, fg=TEXT,
+                 font=("Segoe UI Semibold", 17)).pack(side="left", padx=20)
+        self.version_label = tk.Label(header, text=f"v{VERSION}", bg=PANEL, fg=MUTED,
+                                      font=("Segoe UI", 9))
+        self.version_label.pack(side="left", pady=5)
+        ttk.Button(header, text="Güncellemeleri kontrol et", command=self.check_updates).pack(side="right", padx=16)
+
+        self.login = tk.Frame(self.root, bg=BG, padx=22, pady=18)
+        self.login.pack(fill="x")
+        fields = tk.Frame(self.login, bg=BG)
+        fields.pack(fill="x")
+        self.host = self._field(fields, "IP / Host", "192.168.1.100", 0)
+        self.port = self._field(fields, "Port", "22", 1)
+        self.username = self._field(fields, "Kullanıcı adı", "root", 2)
+        self.password = self._field(fields, "Şifre", "", 3, show="•")
+        self.password.bind("<Return>", lambda _e: self.connect())
+        self.connect_btn = ttk.Button(self.login, text="Bağlan", style="Connect.TButton", command=self.connect)
+        self.connect_btn.pack(anchor="e", pady=(12, 0))
+
+        terminal_header = tk.Frame(self.root, bg=PANEL, height=42)
+        terminal_header.pack(fill="x", padx=18)
+        terminal_header.pack_propagate(False)
+        tk.Label(terminal_header, text="TERMINAL", bg=PANEL, fg=MUTED,
+                 font=("Segoe UI", 9, "bold")).pack(side="left", padx=12)
+        self.status = tk.Label(terminal_header, text="● Bağlı değil", bg=PANEL, fg=MUTED,
+                               font=("Segoe UI", 9))
+        self.status.pack(side="left", padx=12)
+        self.disconnect_btn = ttk.Button(terminal_header, text="Bağlantıyı kes",
+                                         command=self.disconnect, state="disabled")
+        self.disconnect_btn.pack(side="right", padx=8, pady=5)
+
+        terminal_wrap = tk.Frame(self.root, bg=BG, padx=18, pady=0)
+        terminal_wrap.pack(fill="both", expand=True)
+        self.terminal = tk.Text(terminal_wrap, bg="#090b0f", fg="#d8e2ee",
+                                insertbackground="white", selectbackground="#315b91",
+                                font=("Consolas", 10), wrap="char", undo=False,
+                                borderwidth=0, padx=12, pady=12, state="disabled")
+        scroll = ttk.Scrollbar(terminal_wrap, command=self.terminal.yview)
+        self.terminal.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        self.terminal.pack(side="left", fill="both", expand=True)
+        self.terminal.bind("<KeyPress>", self._terminal_key)
+        self.terminal.bind("<<Paste>>", self._paste)
+        self.terminal.bind("<Button-1>", lambda _e: self.terminal.focus_set())
+
+        footer = tk.Frame(self.root, bg=PANEL, height=30)
+        footer.pack(fill="x", side="bottom")
+        footer.pack_propagate(False)
+        tk.Label(footer, text="Şifreler diske kaydedilmez  •  Paramiko SSH",
+                 bg=PANEL, fg=MUTED, font=("Segoe UI", 8)).pack(side="left", padx=12)
+        self.footer_status = tk.Label(footer, text="Hazır", bg=PANEL, fg=MUTED,
+                                      font=("Segoe UI", 8))
+        self.footer_status.pack(side="right", padx=12)
+        self._write("FinalSSH hazır. Bağlanmak için sunucu bilgilerini girin.\n")
+
+    def _field(self, parent, label, value, column, show=None):
+        block = tk.Frame(parent, bg=BG)
+        block.grid(row=0, column=column, sticky="ew", padx=(0, 12))
+        parent.grid_columnconfigure(column, weight=1)
+        tk.Label(block, text=label, bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 5))
+        entry = ttk.Entry(block, show=show)
+        entry.insert(0, value)
+        entry.pack(fill="x")
+        return entry
+
+    def _write(self, text):
+        self.terminal.configure(state="normal")
+        self.terminal.insert("end", text)
+        self.terminal.see("end")
+        self.terminal.configure(state="disabled")
+
+    def _set_status(self, text, color=MUTED):
+        self.status.configure(text=text, fg=color)
+
+    def _ask_host_key(self, hostname, key_type, fingerprint):
+        answer = threading.Event()
+        result = {"accepted": False}
+        def ask():
+            result["accepted"] = messagebox.askyesno(
+                "Yeni SSH sunucu anahtarı",
+                f"Sunucu: {hostname}\nAnahtar türü: {key_type}\nParmak izi: {fingerprint}\n\n"
+                "Bu sunucuya ilk kez bağlanıyorsunuz. Anahtara güveniyor musunuz?",
+                parent=self.root)
+            answer.set()
+        self.root.after(0, ask)
+        answer.wait()
+        return result["accepted"]
+
+    def connect(self):
+        if self.connected:
+            return
+        host = self.host.get().strip()
+        user = self.username.get().strip()
+        secret = self.password.get()
+        try:
+            port = int(self.port.get().strip())
+            if not host or not user or not (1 <= port <= 65535):
+                raise ValueError()
+        except ValueError:
+            messagebox.showerror("Bilgi eksik", "Geçerli IP/Host, port ve kullanıcı adı girin.")
+            return
+        self.connect_btn.configure(state="disabled")
+        self._set_status("● Bağlanıyor...", ACCENT)
+        self._write(f"\n[{host}:{port}] Bağlantı kuruluyor...\n")
+        threading.Thread(target=self._connect_worker,
+                         args=(host, port, user, secret), daemon=True).start()
+
+    def _connect_worker(self, host, port, user, secret):
+        client = paramiko.SSHClient()
+        known = Path.home() / ".finalssh" / "known_hosts"
+        if known.exists():
+            client.load_host_keys(str(known))
+        client.set_missing_host_key_policy(TrustOnFirstUse(self._ask_host_key))
+        try:
+            client.connect(hostname=host, port=port, username=user,
+                           password=secret or None, timeout=12, banner_timeout=12,
+                           auth_timeout=15, look_for_keys=True, allow_agent=True)
+            channel = client.invoke_shell(term="xterm-256color", width=120, height=32)
+            channel.settimeout(0.0)
+            self.events.put(("connected", client, channel, host, user))
+        except Exception as exc:
+            client.close()
+            self.events.put(("error", f"Bağlantı kurulamadı: {exc}"))
+
+    def _process_events(self):
+        try:
+            while True:
+                event = self.events.get_nowait()
+                kind = event[0]
+                if kind == "connected":
+                    _, self.client, self.channel, host, user = event
+                    self.connected = True
+                    self.connect_btn.configure(state="disabled")
+                    self.disconnect_btn.configure(state="normal")
+                    self._set_status(f"● {user}@{host}", GREEN)
+                    self.footer_status.configure(text="SSH bağlantısı aktif")
+                    self._write(f"\n--- {user}@{host} bağlantısı kuruldu ---\n")
+                    threading.Thread(target=self._read_worker, daemon=True).start()
+                    self.terminal.focus_set()
+                elif kind == "output":
+                    self._write(event[1])
+                elif kind == "closed":
+                    self._finish_disconnect(event[1])
+                elif kind == "error":
+                    self._write(event[1] + "\n")
+                    self._set_status("● Bağlantı hatası", RED)
+                    self.footer_status.configure(text="Bağlantı başarısız")
+                    self.connect_btn.configure(state="normal")
+        except queue.Empty:
+            pass
+        if not self.closing:
+            self.root.after(80, self._process_events)
+
+    def _read_worker(self):
+        try:
+            while self.channel and not self.channel.closed:
+                if self.channel.recv_ready():
+                    data = self.channel.recv(32768)
+                    if not data:
+                        break
+                    self.events.put(("output", data.decode("utf-8", errors="replace")))
+                elif self.channel.exit_status_ready():
+                    break
+                else:
+                    time.sleep(0.025)
+        except Exception as exc:
+            if self.connected:
+                self.events.put(("output", f"\n[SSH okuma hatası: {exc}]\n"))
+        self.events.put(("closed", "Uzak bağlantı kapandı."))
+
+    def _terminal_key(self, event):
+        if not self.connected or not self.channel:
+            return "break"
+        if event.state & 0x4 and event.keysym.lower() in ("c", "v"):
+            if event.keysym.lower() == "c":
+                return None
+            return None
+        mapping = {"Return": "\r", "BackSpace": "\x7f", "Tab": "\t",
+                   "Up": "\x1b[A", "Down": "\x1b[B", "Right": "\x1b[C",
+                   "Left": "\x1b[D", "Home": "\x1b[H", "End": "\x1b[F",
+                   "Delete": "\x1b[3~"}
+        payload = mapping.get(event.keysym)
+        if payload is None and event.char:
+            payload = event.char
+        if payload:
+            try:
+                self.channel.send(payload.encode("utf-8"))
+            except Exception as exc:
+                self._write(f"\n[Gönderme hatası: {exc}]\n")
+        return "break"
+
+    def _paste(self, _event):
+        if self.connected and self.channel:
+            try:
+                self.channel.send(self.root.clipboard_get().encode("utf-8"))
+            except Exception:
+                pass
+        return "break"
+
+    def disconnect(self):
+        if self.client:
+            try:
+                self.client.close()
+            except Exception:
+                pass
+        self._finish_disconnect("Bağlantı kapatıldı.")
+
+    def _finish_disconnect(self, message):
+        if self.connected or self.client:
+            try:
+                if self.client:
+                    self.client.close()
+            except Exception:
+                pass
+        self.client = None
+        self.channel = None
+        self.connected = False
+        self.connect_btn.configure(state="normal")
+        self.disconnect_btn.configure(state="disabled")
+        self._set_status("● Bağlı değil", MUTED)
+        self.footer_status.configure(text="Hazır")
+        self._write(f"\n[{message}]\n")
+
+    def check_updates(self):
+        self.footer_status.configure(text="Güncellemeler kontrol ediliyor...")
+        threading.Thread(target=self._check_updates_worker, daemon=True).start()
+
+    def _check_updates_worker(self):
+        try:
+            request = urllib.request.Request(API_URL, headers={"User-Agent": APP_NAME})
+            with urllib.request.urlopen(request, timeout=12) as response:
+                release = json.loads(response.read().decode("utf-8"))
+            latest = release.get("tag_name", "").lstrip("v")
+            if not latest:
+                raise RuntimeError("GitHub sürüm etiketi bulunamadı.")
+            if latest == VERSION:
+                self.events.put(("update", "current", release))
+            else:
+                self.events.put(("update", "available", release))
+        except Exception as exc:
+            self.events.put(("update", "error", str(exc)))
+
+    def _install_update(self, release):
+        assets = release.get("assets", [])
+        asset = next((a for a in assets if a.get("name", "").lower().endswith(".exe")), None)
+        if not asset:
+            webbrowser.open(release.get("html_url", f"https://github.com/{REPO}/releases"))
+            return
+        if not getattr(sys, "frozen", False):
+            messagebox.showinfo("Güncelleme", "Kaynak kod modundasınız. Yeni sürümü GitHub Releases sayfasından alın.")
+            webbrowser.open(release.get("html_url", ""))
+            return
+        if not messagebox.askyesno("Güncelleme", "Yeni sürüm indirilsin ve uygulama güncellensin?"):
+            return
+        threading.Thread(target=self._download_update, args=(asset,), daemon=True).start()
+
+    def _download_update(self, asset):
+        try:
+            req = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": APP_NAME})
+            with urllib.request.urlopen(req, timeout=60) as response:
+                data = response.read()
+            current = Path(sys.executable).resolve()
+            temp_exe = Path(os.environ.get("TEMP", str(current.parent))) / "FinalSSH-update.exe"
+            temp_exe.write_bytes(data)
+            bat = temp_exe.with_suffix(".bat")
+            script = (
+                "@echo off\r\n"
+                "timeout /t 2 /nobreak >nul\r\n"
+                f'copy /y "{temp_exe}" "{current}" >nul\r\n'
+                f'start "" "{current}"\r\n'
+                f'del "{temp_exe}"\r\n'
+                'del "%~f0"\r\n'
+            )
+            bat.write_text(script, encoding="utf-8")
+            os.startfile(str(bat))
+            self.root.after(0, self.close)
+        except Exception as exc:
+            self.events.put(("output", f"\n[Güncelleme hatası: {exc}]\n"))
+
+    def close(self):
+        self.closing = True
+        try:
+            if self.client:
+                self.client.close()
+        except Exception:
+            pass
+        self.root.destroy()
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = FinalSSH(root)
+    def handle_event():
+        try:
+            while True:
+                event = app.events.get_nowait()
+                if event[0] == "update":
+                    _, status, payload = event
+                    if status == "current":
+                        app.footer_status.configure(text="En güncel sürüm kullanılıyor")
+                        messagebox.showinfo("Güncelleme", f"FinalSSH v{VERSION} güncel.")
+                    elif status == "available":
+                        app.footer_status.configure(text=f"Yeni sürüm: {payload.get('tag_name')}")
+                        if messagebox.askyesno("Yeni sürüm bulundu",
+                            f"Yeni sürüm {payload.get('tag_name')} bulundu.\nŞimdi güncellensin mi?"):
+                            app._install_update(payload)
+                    else:
+                        app.footer_status.configure(text="Güncelleme kontrolü başarısız")
+                        messagebox.showerror("Güncelleme", payload)
+                else:
+                    app.events.put(event)
+                    break
+        except queue.Empty:
+            pass
+        if not app.closing:
+            root.after(150, handle_event)
+    root.after(150, handle_event)
+    root.mainloop()
