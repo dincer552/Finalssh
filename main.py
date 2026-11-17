@@ -1,13 +1,11 @@
 import os
 import sys
+import ctypes
 import json
 import time
 import queue
 import socket
 import threading
-import shutil
-import shlex
-import subprocess
 import urllib.request
 import webbrowser
 import tkinter as tk
@@ -36,18 +34,50 @@ def app_dir():
     return Path(__file__).resolve().parent
 
 
-def find_cloudflared():
-    # A released one-file EXE must use only the binary embedded at build time.
-    # PyInstaller exposes bundled resources from its private runtime directory.
+CLOUDFLARED_DLL_NAME = "cloudflared-windows-amd64.dll"
+
+
+def find_cloudflared_dll():
     if getattr(sys, "frozen", False):
         bundled_dir = getattr(sys, "_MEIPASS", None)
         if not bundled_dir:
             return None
-        embedded_client = Path(bundled_dir) / "cloudflared.exe"
-        return str(embedded_client) if embedded_client.is_file() else None
+        candidate = Path(bundled_dir) / CLOUDFLARED_DLL_NAME
+        return candidate if candidate.is_file() else None
 
-    # Source/developer runs may use a locally installed official client.
-    return shutil.which("cloudflared")
+    base = Path(__file__).resolve().parent
+    for candidate in (base / "vendor" / CLOUDFLARED_DLL_NAME, base / CLOUDFLARED_DLL_NAME):
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def load_cloudflared_dll():
+    dll_path = find_cloudflared_dll()
+    if not dll_path:
+        raise RuntimeError(
+            "QudsLab Cloudflared DLL bulunamadı. FinalSSH paketini GitHub Actions Release üzerinden indirin."
+        )
+
+    directory_handle = None
+    try:
+        if os.name == "nt" and hasattr(os, "add_dll_directory"):
+            directory_handle = os.add_dll_directory(str(dll_path.parent))
+        library = ctypes.CDLL(str(dll_path))
+        library.CloudflaredInit.argtypes = []
+        library.CloudflaredInit.restype = ctypes.c_int
+        library.CloudflaredRun.argtypes = [ctypes.c_char_p]
+        library.CloudflaredRun.restype = ctypes.c_int
+        library.CloudflaredStop.argtypes = []
+        library.CloudflaredStop.restype = ctypes.c_int
+        library.CloudflaredVersion.argtypes = []
+        library.CloudflaredVersion.restype = ctypes.c_char_p
+        library._finalssh_dll_directory = directory_handle
+        return library
+    except Exception:
+        if directory_handle:
+            directory_handle.close()
+        raise
 
 
 class TrustOnFirstUse(paramiko.MissingHostKeyPolicy):
@@ -74,6 +104,7 @@ class FinalSSH:
         self.events = queue.Queue()
         self.client = None
         self.channel = None
+        self.cf_runtime = None
         self.connected = False
         self.closing = False
         self._build_ui()
@@ -130,7 +161,7 @@ class FinalSSH:
         self.cf_frame = tk.Frame(self.login, bg=BG)
         self.cf_id = self._field(self.cf_frame, "Access Client ID (isteğe bağlı)", "", 0)
         self.cf_secret = self._field(self.cf_frame, "Access Client Secret (isteğe bağlı)", "", 1, show="•")
-        tk.Label(self.cf_frame, text="cloudflared uygulamaya dahildir • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
+        tk.Label(self.cf_frame, text="Cloudflare bağlantı motoru uygulamaya gömülüdür • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
                  bg=BG, fg=MUTED, font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7,0))
         self.connect_btn = ttk.Button(self.login, text="Bağlan", style="Connect.TButton", command=self.connect)
         self.connect_btn.pack(anchor="e", pady=(12, 0))
@@ -285,15 +316,87 @@ class FinalSSH:
         mode = "Cloudflare Tunnel" if self.cloudflare_enabled.get() else "Normal SSH"
         cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
         cf_secret = self.cf_secret.get().strip() if mode == "Cloudflare Tunnel" else ""
-        if mode == "Cloudflare Tunnel" and not find_cloudflared():
-            messagebox.showerror("Cloudflare bileşeni bulunamadı",
-                "Bu pakette cloudflared.exe bulunamadı. Uygulamayı GitHub Releases üzerinden yeniden indirin.")
-            return
         self.connect_btn.configure(state="disabled")
         self._set_status("● Bağlanıyor...", ACCENT)
         self._write(f"\n[{host}:{port}] {mode} bağlantısı kuruluyor...\n")
         threading.Thread(target=self._connect_worker,
                          args=(host, port, user, key_path, mode, cf_id, cf_secret), daemon=True).start()
+
+    def _start_cloudflare_tunnel(self, host, cf_id, cf_secret):
+        if bool(cf_id) != bool(cf_secret):
+            raise RuntimeError("Access Client ID ve Client Secret birlikte girilmelidir.")
+        if not host or any(ch.isspace() for ch in host) or host.startswith("-"):
+            raise RuntimeError("Cloudflare hostname alanına yalnızca hostname girin (ör. ssh.example.com).")
+
+        library = load_cloudflared_dll()
+        init_result = library.CloudflaredInit()
+        if init_result != 0:
+            raise RuntimeError(f"Cloudflare DLL başlatılamadı (CloudflaredInit={init_result}).")
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reservation:
+            reservation.bind(("127.0.0.1", 0))
+            local_port = reservation.getsockname()[1]
+
+        env_names = ("TUNNEL_SERVICE_TOKEN_ID", "TUNNEL_SERVICE_TOKEN_SECRET")
+        env_backup = {name: os.environ.get(name) for name in env_names}
+        runtime = {"dll": library, "socket": None, "env_backup": env_backup, "port": local_port}
+
+        try:
+            for name in env_names:
+                os.environ.pop(name, None)
+            if cf_id and cf_secret:
+                os.environ["TUNNEL_SERVICE_TOKEN_ID"] = cf_id
+                os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = cf_secret
+
+            command = (
+                f"cloudflared access ssh --hostname {host} "
+                f"--url 127.0.0.1:{local_port} --loglevel error"
+            )
+            run_result = library.CloudflaredRun(command.encode("utf-8"))
+            if run_result != 0:
+                raise RuntimeError(f"Cloudflare DLL komutu başlatılamadı (CloudflaredRun={run_result}).")
+
+            deadline = time.monotonic() + 30
+            last_error = None
+            while time.monotonic() < deadline:
+                try:
+                    local_socket = socket.create_connection(("127.0.0.1", local_port), timeout=0.5)
+                    local_socket.settimeout(45)
+                    runtime["socket"] = local_socket
+                    return runtime
+                except OSError as exc:
+                    last_error = exc
+                    time.sleep(0.2)
+
+            detail = f": {last_error}" if last_error else ""
+            raise RuntimeError("Cloudflare DLL yerel SSH yönlendiricisini 30 saniye içinde başlatamadı" + detail)
+        except Exception:
+            self._stop_cloudflare_runtime(runtime)
+            raise
+
+    def _stop_cloudflare_runtime(self, runtime):
+        if not runtime:
+            return
+        local_socket = runtime.get("socket")
+        if local_socket:
+            try:
+                local_socket.close()
+            except Exception:
+                pass
+        library = runtime.get("dll")
+        if library:
+            try:
+                library.CloudflaredStop()
+            except Exception:
+                pass
+        for name, previous_value in (runtime.get("env_backup") or {}).items():
+            try:
+                if previous_value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = previous_value
+            except Exception:
+                pass
 
     def _connect_worker(self, host, port, user, key_path, mode="Normal SSH", cf_id="", cf_secret=""):
         client = paramiko.SSHClient()
@@ -301,37 +404,14 @@ class FinalSSH:
         if known.exists():
             client.load_host_keys(str(known))
         client.set_missing_host_key_policy(TrustOnFirstUse(self._ask_host_key))
-        proxy = None
+        cf_runtime = None
         try:
             if mode == "Cloudflare Tunnel":
-                cloudflared = find_cloudflared()
-                if not cloudflared:
-                    raise RuntimeError("Uygulama içindeki cloudflared.exe bulunamadı. FinalSSH paketini yeniden indirin.")
-                command_parts = [cloudflared, "access", "ssh", "--hostname", host]
-                if bool(cf_id) != bool(cf_secret):
-                    raise RuntimeError("Client ID ve Client Secret birlikte girilmelidir.")
-                command = subprocess.list2cmdline(command_parts) if os.name == "nt" else shlex.join(command_parts)
-                # cloudflared reads service tokens from its environment; do not expose
-                # the secret in command-line arguments or persist it to disk.
-                old_id = os.environ.get("TUNNEL_SERVICE_TOKEN_ID")
-                old_secret = os.environ.get("TUNNEL_SERVICE_TOKEN_SECRET")
-                try:
-                    if cf_id and cf_secret:
-                        os.environ["TUNNEL_SERVICE_TOKEN_ID"] = cf_id
-                        os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = cf_secret
-                    proxy = paramiko.ProxyCommand(command)
-                finally:
-                    if old_id is None:
-                        os.environ.pop("TUNNEL_SERVICE_TOKEN_ID", None)
-                    else:
-                        os.environ["TUNNEL_SERVICE_TOKEN_ID"] = old_id
-                    if old_secret is None:
-                        os.environ.pop("TUNNEL_SERVICE_TOKEN_SECRET", None)
-                    else:
-                        os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = old_secret
+                cf_runtime = self._start_cloudflare_tunnel(host, cf_id, cf_secret)
+                self.events.put(("output", f"[Cloudflare DLL] Yerel güvenli yönlendirici 127.0.0.1:{cf_runtime['port']} hazır.\\n"))
                 client.connect(hostname=host, port=port, username=user,
-                               key_filename=key_path, sock=proxy, timeout=25,
-                               banner_timeout=25, auth_timeout=20,
+                               key_filename=key_path, sock=cf_runtime["socket"],
+                               timeout=45, banner_timeout=45, auth_timeout=25,
                                look_for_keys=True, allow_agent=True)
             else:
                 client.connect(hostname=host, port=port, username=user,
@@ -339,11 +419,10 @@ class FinalSSH:
                                auth_timeout=15, look_for_keys=True, allow_agent=True)
             channel = client.invoke_shell(term="xterm-256color", width=120, height=32)
             channel.settimeout(0.0)
-            self.events.put(("connected", client, channel, host, user))
+            self.events.put(("connected", client, channel, host, user, cf_runtime))
         except Exception as exc:
             client.close()
-            if proxy:
-                proxy.close()
+            self._stop_cloudflare_runtime(cf_runtime)
             self.events.put(("error", f"Bağlantı kurulamadı: {exc}"))
 
     def _process_events(self):
@@ -352,7 +431,7 @@ class FinalSSH:
                 event = self.events.get_nowait()
                 kind = event[0]
                 if kind == "connected":
-                    _, self.client, self.channel, host, user = event
+                    _, self.client, self.channel, host, user, self.cf_runtime = event
                     self.connected = True
                     self.connect_btn.configure(state="disabled")
                     self.disconnect_btn.configure(state="normal")
@@ -458,6 +537,8 @@ class FinalSSH:
                 pass
         self.client = None
         self.channel = None
+        self._stop_cloudflare_runtime(self.cf_runtime)
+        self.cf_runtime = None
         self.connected = False
         self.connect_btn.configure(state="normal")
         self.disconnect_btn.configure(state="disabled")
@@ -534,6 +615,8 @@ class FinalSSH:
                 self.client.close()
         except Exception:
             pass
+        self._stop_cloudflare_runtime(self.cf_runtime)
+        self.cf_runtime = None
         self.root.destroy()
 
 
