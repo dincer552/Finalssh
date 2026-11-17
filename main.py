@@ -77,6 +77,7 @@ class FinalSSH:
         self.connected = False
         self.closing = False
         self._build_ui()
+        self._load_settings()
         self.root.after(80, self._process_events)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
 
@@ -168,7 +169,51 @@ class FinalSSH:
         self.footer_status = tk.Label(footer, text="Hazır", bg=PANEL, fg=MUTED,
                                       font=("Segoe UI", 8))
         self.footer_status.pack(side="right", padx=12)
+        for entry in (self.host, self.port, self.username, self.key_path, self.cf_id, self.cf_secret):
+            entry.bind("<FocusOut>", lambda _event: self._save_settings())
         self._write("FinalSSH hazır. Bağlanmak için sunucu bilgilerini girin.\n")
+
+    def _settings_file(self):
+        base = Path(os.environ.get("APPDATA", str(Path.home()))) / "FinalSSH"
+        return base / "settings.json"
+
+    def _load_settings(self):
+        try:
+            path = self._settings_file()
+            if not path.is_file():
+                return
+            settings = json.loads(path.read_text(encoding="utf-8"))
+            for widget, key in (
+                (self.host, "host"), (self.port, "port"),
+                (self.username, "username"), (self.key_path, "key_path"),
+                (self.cf_id, "cloudflare_client_id"),
+            ):
+                value = settings.get(key)
+                if value is not None:
+                    widget.delete(0, "end")
+                    widget.insert(0, str(value))
+            self.cloudflare_enabled.set(bool(settings.get("cloudflare_enabled", False)))
+            self._mode_changed()
+        except Exception as exc:
+            self._write(f"[Ayarlar yüklenemedi: {exc}]\\n")
+
+    def _save_settings(self):
+        try:
+            path = self._settings_file()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            settings = {
+                "host": self.host.get().strip(),
+                "port": self.port.get().strip(),
+                "username": self.username.get().strip(),
+                "key_path": self.key_path.get().strip(),
+                "cloudflare_enabled": bool(self.cloudflare_enabled.get()),
+                "cloudflare_client_id": self.cf_id.get().strip(),
+            }
+            temp_path = path.with_suffix(".tmp")
+            temp_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8")
+            temp_path.replace(path)
+        except Exception as exc:
+            self._write(f"[Ayarlar kaydedilemedi: {exc}]\\n")
 
     def _browse_key(self):
         path = filedialog.askopenfilename(
@@ -185,6 +230,7 @@ class FinalSSH:
             self.cf_frame.pack(fill="x", pady=(8, 0), before=self.connect_btn)
         else:
             self.cf_frame.pack_forget()
+        self._save_settings()
 
     def _field(self, parent, label, value, column, show=None):
         block = tk.Frame(parent, bg=BG)
@@ -220,6 +266,7 @@ class FinalSSH:
         return result["accepted"]
 
     def connect(self):
+        self._save_settings()
         if self.connected:
             return
         host = self.host.get().strip()
@@ -480,6 +527,7 @@ class FinalSSH:
             self.events.put(("output", f"\n[Güncelleme hatası: {exc}]\n"))
 
     def close(self):
+        self._save_settings()
         self.closing = True
         try:
             if self.client:
