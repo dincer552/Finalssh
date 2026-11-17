@@ -74,6 +74,11 @@ Kaynak kod modunda doğrudan SSH için cloudflared gerekmez. Cloudflare Tunnel �
 
 Uygulamadaki **Güncellemeleri kontrol et** düğmesi GitHub'daki en son Release'i kontrol eder. Daha yeni sürüm bulunursa kullanıcı onayından sonra EXE indirilir; uygulama kapanır, dosya değiştirilir ve yeni sürüm yeniden başlatılır. Sürüm karşılaştırması sayısal bileşenlerle yapılır (ör. `0.2.10`, `0.2.9` sürümünden yenidir).
 
+
+### GitHub Actions artifact
+
+Her başarılı Actions çalıştırmasında **Actions → ilgili workflow run → Artifacts** bölümünde `FinalSSH-<version>` adlı ZIP paketi de indirilebilir. Bu Actions artifact'i 30 gün saklanır. Aynı ZIP ayrıca GitHub Releases dosyalarına da eklenir.
+
 ## Üçüncü taraf bileşen
 
 FinalSSH, Cloudflare'ın resmî `cloudflared` istemcisini paketler. Dağıtım ve lisans bilgileri için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) dosyasına ve [Cloudflare cloudflared projesine](https://github.com/cloudflare/cloudflared) bakın.
