@@ -36,6 +36,17 @@ def app_dir():
     return Path(__file__).resolve().parent
 
 
+def find_cloudflared():
+    found = shutil.which("cloudflared")
+    if found:
+        return found
+    candidates = [app_dir() / "cloudflared.exe", Path(sys.executable).parent / "cloudflared.exe"]
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
 class TrustOnFirstUse(paramiko.MissingHostKeyPolicy):
     def __init__(self, callback):
         self.callback = callback
@@ -205,7 +216,7 @@ class FinalSSH:
         mode = self.connection_mode.get()
         cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
         cf_secret = self.cf_secret.get().strip() if mode == "Cloudflare Tunnel" else ""
-        if mode == "Cloudflare Tunnel" and not shutil.which("cloudflared"):
+        if mode == "Cloudflare Tunnel" and not find_cloudflared():
             messagebox.showerror("cloudflared bulunamadı",
                 "Cloudflare Tunnel bağlantısı için cloudflared Windows istemcisini kurun ve PATH'e ekleyin.")
             return
@@ -224,7 +235,7 @@ class FinalSSH:
         proxy = None
         try:
             if mode == "Cloudflare Tunnel":
-                cloudflared = shutil.which("cloudflared")
+                cloudflared = find_cloudflared()
                 if not cloudflared:
                     raise RuntimeError("cloudflared.exe bulunamadı. Kurup PATH'e ekleyin.")
                 command_parts = [cloudflared, "access", "ssh", "--hostname", host]
