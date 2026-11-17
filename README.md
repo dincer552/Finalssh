@@ -33,7 +33,7 @@ The app also supports SSH through a Cloudflare Tunnel protected by Cloudflare Ac
 4. In FinalSSH choose **Cloudflare Tunnel**, enter the public Access hostname (for example `ssh.example.com`) in Host/IP, and enter the Linux SSH username/password or use an SSH key available to Paramiko.
 5. Leave both Access token fields empty for browser-based Access login, or enter both a Service Token Client ID and Client Secret for a Service Auth policy.
 
-The Client ID and Client Secret are passed to `cloudflared access ssh` as service-token arguments. They are not saved by FinalSSH. The SSH username/password or key remains a separate authentication step on the VM. The port field is still passed to Paramiko; the published Cloudflare SSH route must target the matching SSH service port (normally 22).
+The Client ID and Client Secret are passed to the `cloudflared` child process through environment variables and are not saved by FinalSSH or exposed as command-line arguments. The SSH username/password or key remains a separate authentication step on the VM. Cloudflare Tunnel's published route determines the origin SSH port (commonly 22); the port field is used for direct SSH connections.
 
 ## Security
 - Credentials are not persisted.
