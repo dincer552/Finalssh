@@ -43,31 +43,46 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q main.py
 
-      - name: Download and verify official Cloudflare client
+      - name: Download and verify QudsLab Cloudflared DLL
         shell: pwsh
         run: |
-          $headers = @{
-            "User-Agent" = "FinalSSH-Build"
-            "Accept" = "application/vnd.github+json"
-          }
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/cloudflare/cloudflared/releases/latest" -Headers $headers
-          $asset = $release.assets | Where-Object { $_.name -eq "cloudflared-windows-amd64.exe" } | Select-Object -First 1
-          if (-not $asset) {
-            throw "Official cloudflared Windows AMD64 release asset was not found."
-          }
-          if ($asset.digest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
-            throw "GitHub did not provide a SHA256 digest for the official cloudflared binary."
-          }
-          $expectedHash = $Matches[1].ToLowerInvariant()
-          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile "cloudflared.exe"
-          $actualHash = (Get-FileHash "cloudflared.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $dllUrl = "https://raw.githubusercontent.com/QudsLab/Cloudflared/ef1b0c079a3110234a17f7764eb83d5c9162350f/binaries/windows-amd64/cloudflared-windows-amd64.dll"
+          $expectedHash = "d4f87009251fc952606dba6d8ad54f4a003ec290f93f37593c38badd1a60e745"
+          Invoke-WebRequest -Uri $dllUrl -OutFile "cloudflared-windows-amd64.dll"
+          $actualHash = (Get-FileHash "cloudflared-windows-amd64.dll" -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualHash -ne $expectedHash) {
-            throw "cloudflared SHA256 verification failed. Expected $expectedHash, got $actualHash"
+            throw "QudsLab Cloudflared DLL SHA256 verification failed. Expected $expectedHash, got $actualHash"
           }
-          Write-Host "Verified official cloudflared $($release.tag_name), SHA256: $actualHash"
+          Write-Host "Verified QudsLab Cloudflared DLL SHA256: $actualHash"
+
+      - name: Smoke test QudsLab DLL exports
+        shell: pwsh
+        run: |
+          @'
+          import ctypes
+          from pathlib import Path
+
+          dll_path = Path("cloudflared-windows-amd64.dll").resolve()
+          lib = ctypes.CDLL(str(dll_path))
+          lib.CloudflaredInit.argtypes = []
+          lib.CloudflaredInit.restype = ctypes.c_int
+          lib.CloudflaredStop.argtypes = []
+          lib.CloudflaredStop.restype = ctypes.c_int
+          lib.CloudflaredVersion.argtypes = []
+          lib.CloudflaredVersion.restype = ctypes.c_char_p
+
+          version = lib.CloudflaredVersion()
+          assert version, "CloudflaredVersion returned an empty value"
+          init_result = lib.CloudflaredInit()
+          assert init_result == 0, f"CloudflaredInit returned {init_result}"
+          stop_result = lib.CloudflaredStop()
+          assert stop_result == 0, f"CloudflaredStop returned {stop_result}"
+          print("QudsLab Cloudflared DLL loaded; version:", version.decode("utf-8", "replace"))
+          '@ | python -
+
 
       - name: Build single-file Windows executable
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared.exe;." main.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared-windows-amd64.dll;." main.py
 
       - name: Create ZIP package
         shell: pwsh
