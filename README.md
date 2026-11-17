@@ -27,7 +27,7 @@ Push a version tag such as `v0.1.1`. GitHub Actions builds the Windows executabl
 
 The app also supports SSH through a Cloudflare Tunnel protected by Cloudflare Access.
 
-1. Install the Windows `cloudflared` client and make sure `cloudflared.exe` is available in PATH.
+1. Install the Windows `cloudflared` client from [Cloudflare's official installation guide](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/), or place `cloudflared.exe` next to `FinalSSH.exe` (PATH is also supported).
 2. In Cloudflare Zero Trust, publish the SSH hostname and route it to the VM SSH service (commonly `localhost:22` on the tunnel host).
 3. Configure a Cloudflare Access application/policy for that hostname.
 4. In FinalSSH choose **Cloudflare Tunnel**, enter the public Access hostname (for example `ssh.example.com`) in Host/IP, and enter the Linux SSH username/password or use an SSH key available to Paramiko.
