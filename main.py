@@ -636,12 +636,12 @@ class FinalSSH:
         threading.Thread(target=worker, name="finalssh-update-check", daemon=True).start()
 
     def _manual_update_check(self):
-        if self._update_check_running or self._update_running:
+        if self._update_check_running or getattr(self.root, "_update_running", False):
             return
         self._check_for_update_async(manual=True)
 
     def _start_update(self):
-        if not self._update_available or self._update_running:
+        if not self._update_available or getattr(self.root, "_update_running", False):
             return
         start_update(self.root, self._update_button)
 
