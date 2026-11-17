@@ -20,8 +20,14 @@ python main.py
 ## Build locally
 Run `build.bat`. The executable is written to `dist\FinalSSH.exe`.
 
-## GitHub release
-Push a version tag such as `v0.1.1`. GitHub Actions builds the Windows executable and publishes it as a release asset. The in-app updater checks the latest release and can replace the running executable.
+## Download and automatic updates
+
+1. Download the first `FinalSSH.exe` from the repository's **Releases** page.
+2. Run the EXE on Windows.
+3. Every push to `main`/`master` (or manual run of the **Build and Publish FinalSSH** workflow) builds a new Windows EXE and publishes a versioned GitHub Release.
+4. In the app, click **Güncellemeleri kontrol et**. If a newer release exists, accept the prompt; the app downloads the EXE, replaces itself after closing, and restarts.
+
+GitHub Actions assigns each build a higher version automatically. The updater compares numeric version parts and ignores releases that are not newer. No manual tag creation is needed.
 
 ## Cloudflare Tunnel SSH
 
