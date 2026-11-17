@@ -82,13 +82,13 @@ Kaynak kod modunda doğrudan SSH için Cloudflare DLL gerekmez. Cloudflare Tunne
 
 ## Güncelleme
 
-Uygulamadaki **Güncellemeleri kontrol et** düğmesi GitHub'daki en son Release'i kontrol eder. Daha yeni sürüm bulunursa kullanıcı onayından sonra EXE indirilir; uygulama kapanır, dosya değiştirilir ve yeni sürüm yeniden başlatılır. Sürüm karşılaştırması sayısal bileşenlerle yapılır (ör. `0.2.10`, `0.2.9` sürümünden yenidir).
+FinalSSH, açıldıktan 2 saniye sonra GitHub Releases üzerindeki en son sürümü arka planda kontrol eder; uygulama açık kaldığı sürece bu kontrol 2 dakikada bir tekrarlanır. Başlık alanında:
 
+- **Denetle:** Kullanıcının istediği anda sürüm kontrolünü başlatır.
+- **Güncelle:** Yalnızca daha yeni bir sürüm bulunduğunda etkinleşir.
+- **Yeşil sürüm bilgisi:** Yeni sürüm varsa `Yeni: v0.2.x` biçiminde gösterilir.
 
-### GitHub Actions artifact
+Güncelleme, TEST KONTROL uygulamasındaki gibi 2 MiB'lık küçük parçalar halinde indirilir. Her parça boyut kontrolüyle ve yeniden deneme desteğiyle alınır; parçalar birleştirilince toplam dosya boyutu doğrulanır. İndirme sırasında yüzde, indirilen/toplam MB ve hız pencere başlığında gösterilir.
 
-Her başarılı Actions çalıştırmasında **Actions → ilgili workflow run → Artifacts** bölümünde `FinalSSH-<version>` adlı ZIP paketi de indirilebilir. Bu Actions artifact'i 30 gün saklanır. Aynı ZIP ayrıca GitHub Releases dosyalarına da eklenir.
+İndirme tamamlandığında geçici bir PowerShell betiği çalışan uygulamanın kapanmasını bekler, yeni EXE'yi mevcut dosyanın yerine koyar ve FinalSSH'yi otomatik yeniden başlatır. Kullanıcıya BAT dosyası oluşturulmaz veya gösterilmez.
 
-## Üçüncü taraf bileşen
-
-FinalSSH, Cloudflare'ın resmî `cloudflared` istemcisini paketler. Dağıtım ve lisans bilgileri için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) dosyasına ve [Cloudflare cloudflared projesine](https://github.com/cloudflare/cloudflared) bakın.
