@@ -1,15 +1,65 @@
 # FinalSSH
 
-Minimal Windows desktop SSH client built with Python, Tkinter and Paramiko.
+FinalSSH, Windows için tek dosyalık bir SSH masaüstü istemcisidir. Python, Tkinter ve Paramiko ile geliştirilmiştir. Normal SSH bağlantısının yanında Cloudflare Tunnel + Cloudflare Access üzerinden SSH bağlantısını da destekler.
 
-## Features
-- Connect using host/IP, port, username and a selected PEM/OpenSSH private key file (password authentication is not used).
-- Interactive terminal in the application window.
-- First-connection host-key confirmation; accepted keys are stored in `~/.finalssh/known_hosts`.
-- Passwords are never saved.
-- Check GitHub Releases and update the packaged Windows executable.
+## Özellikler
 
-## Run from source
+- Host/IP, port ve kullanıcı adı ile doğrudan SSH bağlantısı.
+- PEM veya OpenSSH biçiminde private key ile kimlik doğrulama; SSH hesap parolasıyla giriş yoktur.
+- Uygulama içi etkileşimli terminal.
+- İlk bağlantıda sunucu host-key parmak izi onayı; onaylanan anahtarlar `~/.finalssh/known_hosts` konumunda saklanır.
+- Tek bir **Cloudflare Tunnel kullan** kutucuğu: kapalıyken normal SSH, açıkken Cloudflare Access üzerinden SSH.
+- Cloudflare Access tarayıcı tabanlı oturum açma veya Service Token (Client ID + Client Secret) desteği.
+- Uygulama içinden GitHub Releases güncelleme kontrolü ve EXE güncellemesi.
+- Sürüm numarası GitHub Actions tarafından otomatik oluşturulur.
+
+## Kullanıcı için kurulum
+
+1. [GitHub Releases](https://github.com/dincer552/Finalssh/releases/latest) sayfasından `FinalSSH.exe` dosyasını indirin.
+2. EXE'yi çift tıklayarak çalıştırın.
+3. SSH sunucu bilgilerinizi ve private key dosyanızı seçin.
+4. Normal SSH için Cloudflare kutucuğunu boş bırakın. Cloudflare bağlantısı için **Cloudflare Tunnel kullan** kutucuğunu işaretleyin.
+
+**Kullanıcı bilgisayarına ayrıca Python, Paramiko, cloudflared, BAT dosyası veya başka bir Cloudflare programı kurmak gerekmez.** Resmî Windows AMD64 `cloudflared` istemcisi yayımlanan tek dosyalık EXE'nin içine paketlenir. PyInstaller tek dosya uygulamayı başlatırken bu gömülü bileşeni kendi geçici çalışma alanına açar; kullanıcıdan ayrı bir dosya seçmesi veya elle çıkarması istenmez.
+
+## Cloudflare Tunnel ilk yapılandırması
+
+Uygulama Cloudflare istemcisini içerir; ancak bir Cloudflare hesabı veya sunucu tarafındaki Tunnel yapılandırmasını otomatik oluşturmaz. Bu ayarlar sunucu/Cloudflare hesabı tarafında bir kez yapılmalıdır:
+
+1. Cloudflare Zero Trust'ta bir Tunnel oluşturun ve sunucudaki SSH servisine (genellikle `localhost:22`) yönlendiren bir Public Hostname tanımlayın.
+2. Bu hostname için Cloudflare Access uygulaması ve erişim politikası oluşturun.
+3. FinalSSH içinde **Cloudflare Tunnel kullan** kutucuğunu işaretleyin.
+4. Host/IP alanına herkese açık Access hostname'ini (ör. `ssh.example.com`) girin.
+5. Linux kullanıcı adınızı ve PEM/OpenSSH private key dosyanızı seçin.
+6. Tarayıcı üzerinden Access oturumu açmak için Service Token alanlarını boş bırakın. Service Auth politikası kullanıyorsanız Client ID ve Client Secret alanlarının ikisini de doldurun.
+
+Cloudflare Tunnel'ın yayınlanan rotası hedef SSH portunu belirler (genellikle 22). Port alanı doğrudan SSH bağlantısında kullanılır. Cloudflare seçeneği açıkken bağlantı, uygulama içine gömülmüş `cloudflared` istemcisi üzerinden kurulur.
+
+## Güvenlik notları
+
+- SSH private key dosyası uygulama klasörüne kopyalanmaz; Paramiko'ya seçilen dosyanın yolu verilir.
+- SSH sunucu parolası istenmez veya kaydedilmez.
+- İlk bağlantıda sunucu anahtarının parmak izi kullanıcıya gösterilir; yalnızca onaylanırsa kaydedilir.
+- Service Token bilgileri diske yazılmaz; cloudflared alt sürecine ortam değişkenleri üzerinden aktarılır, komut satırı argümanlarına eklenmez.
+- Yalnızca erişim yetkiniz olan sunuculara bağlanın.
+
+## Otomatik derleme ve sürüm yayımlama
+
+GitHub Actions, `main` veya `master` dalına her push işleminde (ya da elle başlatıldığında) Windows EXE üretir ve sürümlü GitHub Release yayımlar.
+
+Derleme akışı:
+
+1. Cloudflare'ın resmî `cloudflared` GitHub Releases kaynağından Windows AMD64 istemcisini alır.
+2. GitHub Releases API'sinin sağladığı SHA-256 özetiyle indirilen dosyayı doğrular. Özet uyuşmazsa derlemeyi durdurur.
+3. Doğrulanan istemciyi PyInstaller kullanarak `FinalSSH.exe` içine ekler.
+4. Sürüm numarasını otomatik artırır ve tek EXE dosyasını GitHub Release'e yükler.
+
+Kullanıcıya ayrı bir `build.bat` veya Cloudflare kurulum paketi dağıtılmaz. Yerel geliştirici çalıştırması için aşağıdaki kaynak kod adımları geçerlidir; Cloudflare özelliği kaynak kod modunda çalıştırılırken sistemde `cloudflared` bulunmalıdır.
+
+## Kaynak koddan çalıştırma
+
+Windows PowerShell:
+
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -17,33 +67,12 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
-## Build
-Official Windows builds are produced by GitHub Actions and published as a single `FinalSSH.exe` in Releases. The release pipeline downloads the official Windows AMD64 `cloudflared` client, verifies its SHA256 digest against GitHub release metadata, and embeds it in the executable.
+Kaynak kod modunda doğrudan SSH için cloudflared gerekmez. Cloudflare Tunnel özelliği için resmî cloudflared istemcisini kurup PATH'e ekleyin.
 
-## Download and automatic updates
+## Güncelleme
 
-1. Download the first `FinalSSH.exe` from the repository's **Releases** page.
-2. Run the EXE on Windows.
-3. Every push to `main`/`master` (or manual run of the **Build and Publish FinalSSH** workflow) builds a new Windows EXE and publishes a versioned GitHub Release.
-4. In the app, click **Güncellemeleri kontrol et**. If a newer release exists, accept the prompt; the app downloads the EXE, replaces itself after closing, and restarts.
+Uygulamadaki **Güncellemeleri kontrol et** düğmesi GitHub'daki en son Release'i kontrol eder. Daha yeni sürüm bulunursa kullanıcı onayından sonra EXE indirilir; uygulama kapanır, dosya değiştirilir ve yeni sürüm yeniden başlatılır. Sürüm karşılaştırması sayısal bileşenlerle yapılır (ör. `0.2.10`, `0.2.9` sürümünden yenidir).
 
-GitHub Actions assigns each build a higher version automatically. The updater compares numeric version parts and ignores releases that are not newer. No manual tag creation is needed.
+## Üçüncü taraf bileşen
 
-## Cloudflare Tunnel SSH
-
-The app also supports SSH through a Cloudflare Tunnel protected by Cloudflare Access.
-
-1. The packaged Windows EXE already contains the official `cloudflared` client. No separate Cloudflare client installation, command prompt, batch file, or manual extraction is required from the user.
-2. In Cloudflare Zero Trust, create a Tunnel and publish the SSH hostname, routing it to the VM SSH service (commonly `localhost:22` on the tunnel host).
-3. Configure a Cloudflare Access application and policy for that hostname.
-4. In FinalSSH tick **Cloudflare Tunnel kullan**, enter the public Access hostname (for example `ssh.example.com`) in Host/IP, then enter the Linux SSH username and select your PEM/OpenSSH private key file.
-5. Leave both Access token fields empty for browser-based Access login, or enter both a Service Token Client ID and Client Secret for a Service Auth policy.
-
-FinalSSH bundles the Cloudflare client, but it does not create a Cloudflare account, Tunnel, DNS hostname, or Access policy for you. Those are configured once in your Cloudflare Zero Trust dashboard.
-
-The Client ID and Client Secret are passed to the `cloudflared` child process through environment variables and are not saved by FinalSSH or exposed as command-line arguments. The SSH private key is used for VM authentication; the app does not ask for the VM account password. Cloudflare Tunnel's published route determines the origin SSH port (commonly 22); the port field is used for direct SSH connections.
-
-## Security
-- Credentials are not persisted.
-- Host keys are confirmed on first connection and then checked on subsequent connections.
-- Use only servers you are authorized to access.
+FinalSSH, Cloudflare'ın resmî `cloudflared` istemcisini paketler. Dağıtım ve lisans bilgileri için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) dosyasına ve [Cloudflare cloudflared projesine](https://github.com/cloudflare/cloudflared) bakın.
