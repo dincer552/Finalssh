@@ -200,8 +200,23 @@ class FinalSSH:
         self.cf_frame = tk.Frame(self.login, bg=BG)
         self.cf_id = self._field(self.cf_frame, "Access Client ID (isteğe bağlı)", "", 0)
         self.cf_secret = self._field(self.cf_frame, "Access Client Secret (isteğe bağlı)", "", 1, show="•")
+        
+        # Advanced Cloudflare options
+        adv_row = tk.Frame(self.cf_frame, bg=BG)
+        adv_row.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.cf_http2 = tk.BooleanVar(value=True)  # Default True for corporate networks
+        ttk.Checkbutton(adv_row, text="HTTP/2 zorla (QUIC engelse)", variable=self.cf_http2).pack(side="left")
+        self.cf_no_tls_verify = tk.BooleanVar(value=False)
+        ttk.Checkbutton(adv_row, text="TLS doğrulamayı atla (SSL inspection varsa)", variable=self.cf_no_tls_verify).pack(side="left", padx=(12, 0))
+        
+        # Proxy settings
+        proxy_row = tk.Frame(self.cf_frame, bg=BG)
+        proxy_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        self.cf_proxy_http = self._field(proxy_row, "HTTP Proxy (isteğe bağlı)", "", 0)
+        self.cf_proxy_https = self._field(proxy_row, "HTTPS Proxy (isteğe bağlı)", "", 1)
+        
         tk.Label(self.cf_frame, text="Cloudflare bağlantı motoru uygulamaya gömülüdür • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
-                 bg=BG, fg=MUTED, font=("Segoe UI", 8)).grid(row=1, column=0, columnspan=2, sticky="w", pady=(7,0))
+                 bg=BG, fg=MUTED, font=("Segoe UI", 8)).grid(row=4, column=0, columnspan=2, sticky="w", pady=(7,0))
         self.connect_btn = ttk.Button(self.login, text="Bağlan", style="Connect.TButton", command=self.connect)
         self.connect_btn.pack(anchor="e", pady=(12, 0))
 
@@ -370,13 +385,17 @@ class FinalSSH:
         mode = "Cloudflare Tunnel" if self.cloudflare_enabled.get() else "Normal SSH"
         cf_id = self.cf_id.get().strip() if mode == "Cloudflare Tunnel" else ""
         cf_secret = self.cf_secret.get().strip() if mode == "Cloudflare Tunnel" else ""
+        cf_http2 = self.cf_http2.get() if mode == "Cloudflare Tunnel" else True
+        cf_no_tls_verify = self.cf_no_tls_verify.get() if mode == "Cloudflare Tunnel" else False
+        cf_proxy_http = self.cf_proxy_http.get().strip() if mode == "Cloudflare Tunnel" else ""
+        cf_proxy_https = self.cf_proxy_https.get().strip() if mode == "Cloudflare Tunnel" else ""
         self.connect_btn.configure(state="disabled")
         self._set_status("● Bağlanıyor...", ACCENT)
         self._write(f"\n[{host}:{port}] {mode} bağlantısı kuruluyor...\n")
         threading.Thread(target=self._connect_worker,
-                         args=(host, port, user, key_path, mode, cf_id, cf_secret), daemon=True).start()
+                         args=(host, port, user, key_path, mode, cf_id, cf_secret, cf_http2, cf_no_tls_verify, cf_proxy_http, cf_proxy_https), daemon=True).start()
 
-    def _start_cloudflare_tunnel(self, host, cf_id, cf_secret):
+    def _start_cloudflare_tunnel(self, host, cf_id, cf_secret, cf_http2=True, cf_no_tls_verify=False, cf_proxy_http="", cf_proxy_https=""):
         if bool(cf_id) != bool(cf_secret):
             raise RuntimeError("Access Client ID ve Client Secret birlikte girilmelidir.")
         if not host or any(ch.isspace() for ch in host) or host.startswith("-"):
@@ -393,7 +412,17 @@ class FinalSSH:
 
         env_names = ("TUNNEL_SERVICE_TOKEN_ID", "TUNNEL_SERVICE_TOKEN_SECRET")
         env_backup = {name: os.environ.get(name) for name in env_names}
-        runtime = {"dll": library, "socket": None, "env_backup": env_backup, "port": local_port}
+        proxy_backup = {}
+        
+        # Proxy ayarları
+        if cf_proxy_http:
+            proxy_backup["HTTP_PROXY"] = os.environ.get("HTTP_PROXY")
+            os.environ["HTTP_PROXY"] = cf_proxy_http
+        if cf_proxy_https:
+            proxy_backup["HTTPS_PROXY"] = os.environ.get("HTTPS_PROXY")
+            os.environ["HTTPS_PROXY"] = cf_proxy_https
+
+        runtime = {"dll": library, "socket": None, "env_backup": env_backup, "proxy_backup": proxy_backup, "port": local_port}
 
         try:
             for name in env_names:
@@ -402,10 +431,19 @@ class FinalSSH:
                 os.environ["TUNNEL_SERVICE_TOKEN_ID"] = cf_id
                 os.environ["TUNNEL_SERVICE_TOKEN_SECRET"] = cf_secret
 
-            command = (
-                f"cloudflared access ssh --hostname {host} "
-                f"--url 127.0.0.1:{local_port} --loglevel error"
-            )
+            # Build command with options
+            command_parts = [
+                "cloudflared access ssh",
+                f"--hostname {host}",
+                f"--url 127.0.0.1:{local_port}",
+                "--loglevel error"
+            ]
+            if cf_http2:
+                command_parts.append("--protocol http2")
+            if cf_no_tls_verify:
+                command_parts.append("--no-tls-verify")
+            
+            command = " ".join(command_parts)
             run_result = library.CloudflaredRun(command.encode("utf-8"))
             if run_result != 0:
                 raise RuntimeError(f"Cloudflare DLL komutu başlatılamadı (CloudflaredRun={run_result}).")
@@ -451,8 +489,16 @@ class FinalSSH:
                     os.environ[name] = previous_value
             except Exception:
                 pass
+        for name, previous_value in (runtime.get("proxy_backup") or {}).items():
+            try:
+                if previous_value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = previous_value
+            except Exception:
+                pass
 
-    def _connect_worker(self, host, port, user, key_path, mode="Normal SSH", cf_id="", cf_secret=""):
+    def _connect_worker(self, host, port, user, key_path, mode="Normal SSH", cf_id="", cf_secret="", cf_http2=True, cf_no_tls_verify=False, cf_proxy_http="", cf_proxy_https=""):
         client = paramiko.SSHClient()
         known = Path.home() / ".finalssh" / "known_hosts"
         if known.exists():
@@ -461,7 +507,7 @@ class FinalSSH:
         cf_runtime = None
         try:
             if mode == "Cloudflare Tunnel":
-                cf_runtime = self._start_cloudflare_tunnel(host, cf_id, cf_secret)
+                cf_runtime = self._start_cloudflare_tunnel(host, cf_id, cf_secret, cf_http2, cf_no_tls_verify, cf_proxy_http, cf_proxy_https)
                 self.events.put(("output", f"[Cloudflare DLL] Yerel güvenli yönlendirici 127.0.0.1:{cf_runtime['port']} hazır.\\n"))
                 client.connect(hostname=host, port=port, username=user,
                                key_filename=key_path, sock=cf_runtime["socket"],
