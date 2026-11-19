@@ -64,7 +64,7 @@ jobs:
 
 
       - name: Build single-file Windows executable
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared-windows-amd64.dll;." main.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name FinalSSH --add-binary "cloudflared-windows-amd64.dll;." --icon "FinalSSH.ico" --collect-all cryptography main.py
 
       - name: Create ZIP package
         shell: pwsh
