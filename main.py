@@ -197,6 +197,10 @@ class FinalSSH:
         ttk.Checkbutton(mode_row, text="Cloudflare Tunnel kullan",
                         variable=self.cloudflare_enabled,
                         command=self._mode_changed).pack(side="left")
+        self.cf_collapse_btn = ttk.Button(mode_row, text="⌄",
+                                          command=self._toggle_cf_frame, width=3)
+        self.cf_collapse_btn.pack(side="right", padx=(8, 0))
+        self.cf_collapsed = False
         self.cf_frame = tk.Frame(self.login, bg=BG)
         self.cf_id = self._field(self.cf_frame, "Access Client ID (isteğe bağlı)", "", 0)
         self.cf_secret = self._field(self.cf_frame, "Access Client Secret (isteğe bağlı)", "", 1, show="•")
@@ -331,11 +335,18 @@ class FinalSSH:
             self.key_path.insert(0, path)
 
     def _mode_changed(self, _event=None):
-        if self.cloudflare_enabled.get():
+        if self.cloudflare_enabled.get() and not self.cf_collapsed:
             self.cf_frame.pack(fill="x", pady=(8, 0), before=self.connect_btn)
+            self.cf_collapse_btn.configure(text="⌄")
         else:
             self.cf_frame.pack_forget()
+            self.cf_collapse_btn.configure(text="⌃")
         self._save_settings()
+
+    def _toggle_cf_frame(self):
+        """Collapse/expand the Cloudflare section to give terminal more space"""
+        self.cf_collapsed = not self.cf_collapsed
+        self._mode_changed()
 
     def _field(self, parent, label, value, column, show=None):
         block = tk.Frame(parent, bg=BG)
