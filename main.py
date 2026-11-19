@@ -233,13 +233,13 @@ class FinalSSH:
                                font=("Segoe UI", 9))
         self.status.pack(side="left", padx=12)
         self.copy_terminal_btn = ttk.Button(terminal_header, text="📋 Kopyala",
-                                            command=self._copy_terminal, width=14)
+                                            command=self._copy_terminal, width=20)
         self.copy_terminal_btn.pack(side="right", padx=6, pady=6)
         self.paste_terminal_btn = ttk.Button(terminal_header, text="📥 Yapıştır",
-                                             command=self._paste_to_terminal, width=14)
+                                             command=self._paste_to_terminal, width=20)
         self.paste_terminal_btn.pack(side="right", padx=6, pady=6)
         self.disconnect_btn = ttk.Button(terminal_header, text="Bağlantıyı Kes",
-                                         command=self.disconnect, state="disabled", width=14)
+                                         command=self.disconnect, state="disabled", width=20)
         self.disconnect_btn.pack(side="right", padx=8, pady=6)
 
         terminal_wrap = tk.Frame(self.root, bg=BG, padx=18, pady=0)
