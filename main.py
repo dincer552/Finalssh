@@ -231,6 +231,9 @@ class FinalSSH:
         self.copy_terminal_btn = ttk.Button(terminal_header, text="📋 Kopyala",
                                             command=self._copy_terminal, width=10)
         self.copy_terminal_btn.pack(side="right", padx=4, pady=5)
+        self.paste_terminal_btn = ttk.Button(terminal_header, text="📥 Yapıştır",
+                                             command=self._paste_to_terminal, width=10)
+        self.paste_terminal_btn.pack(side="right", padx=4, pady=5)
         self.disconnect_btn = ttk.Button(terminal_header, text="Bağlantıyı kes",
                                          command=self.disconnect, state="disabled")
         self.disconnect_btn.pack(side="right", padx=8, pady=5)
@@ -248,6 +251,16 @@ class FinalSSH:
         self.terminal.bind("<KeyPress>", self._terminal_key)
         self.terminal.bind("<<Paste>>", self._paste)
         self.terminal.bind("<Button-1>", lambda _e: self.terminal.focus_set())
+        self.terminal.bind("<Button-3>", self._show_context_menu)  # Right-click context menu
+        
+        # Context menu for copy/paste
+        self.term_menu = tk.Menu(self.terminal, tearoff=0, bg="#ffffff", fg="#18181b",
+                                 activebackground="#e2e8f0", activeforeground="#18181b",
+                                 font=("Segoe UI", 9))
+        self.term_menu.add_command(label="📋 Kopyala", command=self._copy_terminal)
+        self.term_menu.add_command(label="📥 Yapıştır", command=self._paste_to_terminal)
+        self.term_menu.add_separator()
+        self.term_menu.add_command(label="Tümünü Seç", command=lambda: self._select_all_terminal())
 
         footer = tk.Frame(self.root, bg=PANEL, height=30)
         footer.pack(fill="x", side="bottom")
@@ -350,6 +363,34 @@ class FinalSSH:
                 self.footer_status.configure(text="Kopyalanacak metin yok")
         except Exception as exc:
             self.footer_status.configure(text=f"Kopyalama hatası: {exc}")
+
+    def _paste_to_terminal(self):
+        """Paste clipboard content to terminal/SSH"""
+        if not self.connected or not self.channel:
+            self.footer_status.configure(text="Bağlantı yok - yapıştırılamaz")
+            return
+        try:
+            text = self.root.clipboard_get()
+            if text:
+                self.channel.send(text.encode("utf-8"))
+                self.footer_status.configure(text="Yapıştırıldı")
+            else:
+                self.footer_status.configure(text="Panoda metin yok")
+        except Exception as exc:
+            self.footer_status.configure(text=f"Yapıştırma hatası: {exc}")
+
+    def _show_context_menu(self, event):
+        """Show right-click context menu"""
+        try:
+            self.term_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.term_menu.grab_release()
+
+    def _select_all_terminal(self):
+        """Select all text in terminal"""
+        self.terminal.configure(state="normal")
+        self.terminal.tag_add("sel", "1.0", "end-1c")
+        self.terminal.configure(state="disabled")
 
     def _ask_host_key(self, hostname, key_type, fingerprint):
         answer = threading.Event()
