@@ -217,6 +217,10 @@ class FinalSSH:
         
         tk.Label(self.cf_frame, text="Cloudflare bağlantı motoru uygulamaya gömülüdür • Boş bırakılırsa tarayıcıyla Access girişi yapılır",
                  bg=BG, fg=MUTED, font=("Segoe UI", 8)).grid(row=4, column=0, columnspan=2, sticky="w", pady=(7,0))
+        
+        # Test connection button
+        test_btn = ttk.Button(self.cf_frame, text="🔍 Test Bağlantı", command=self._test_connection, width=16)
+        test_btn.grid(row=5, column=0, columnspan=2, pady=(8, 0))
         self.connect_btn = ttk.Button(self.login, text="Bağlan", style="Connect.TButton", command=self.connect)
         self.connect_btn.pack(anchor="e", pady=(12, 0))
 
@@ -391,6 +395,156 @@ class FinalSSH:
         self.terminal.configure(state="normal")
         self.terminal.tag_add("sel", "1.0", "end-1c")
         self.terminal.configure(state="disabled")
+
+    def _test_connection(self):
+        """Diagnose network connectivity for Cloudflare Tunnel"""
+        host = self.host.get().strip()
+        if not host:
+            messagebox.showerror("Hata", "Lütfen önce IP/Hostname alanını doldurun.")
+            return
+        
+        self._write("\n" + "="*50 + "\n")
+        self._write("🔍 BAĞLANTI TANILAMASI BAŞLIYOR\n")
+        self._write("="*50 + "\n")
+        
+        # Run diagnostics in background thread
+        threading.Thread(target=self._run_connection_tests, args=(host,), daemon=True).start()
+
+    def _run_connection_tests(self, host):
+        """Run network diagnostic tests"""
+        import ssl
+        import urllib.request
+        import urllib.error
+        
+        results = []
+        
+        def log(msg):
+            self.events.put(("output", msg + "\n"))
+        
+        # 1. DNS Test
+        log("1. DNS Çözümlemesi...")
+        try:
+            ip = socket.gethostbyname(host)
+            log(f"   ✅ {host} → {ip}")
+            results.append(("DNS", True, f"{host} → {ip}"))
+        except Exception as e:
+            log(f"   ❌ DNS çözümleme hatası: {e}")
+            results.append(("DNS", False, str(e)))
+        
+        # 2. TCP 443 Test
+        log("2. TCP 443 (HTTPS) Test...")
+        try:
+            sock = socket.create_connection((host, 443), timeout=5)
+            sock.close()
+            log("   ✅ TCP 443 açık")
+            results.append(("TCP 443", True, "Açık"))
+        except Exception as e:
+            log(f"   ❌ TCP 443 kapalı/engellenmiş: {e}")
+            results.append(("TCP 443", False, str(e)))
+        
+        # 3. TCP 80 Test
+        log("3. TCP 80 (HTTP) Test...")
+        try:
+            sock = socket.create_connection((host, 80), timeout=5)
+            sock.close()
+            log("   ✅ TCP 80 açık")
+            results.append(("TCP 80", True, "Açık"))
+        except Exception as e:
+            log(f"   ❌ TCP 80 kapalı: {e}")
+            results.append(("TCP 80", False, str(e)))
+        
+        # 4. UDP/QUIC 443 Test
+        log("4. UDP/QUIC 443 Test...")
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(3)
+            sock.sendto(b'\x00', (host, 443))
+            sock.recvfrom(1024)
+            sock.close()
+            log("   ✅ UDP 443 açık (QUIC çalışıyor)")
+            results.append(("UDP 443", True, "Açık"))
+        except socket.timeout:
+            log("   ⚠️ UDP 443 zaman aşımı (QUIC engelli olabilir)")
+            results.append(("UDP 443", False, "Zaman aşımı - QUIC engelli"))
+        except Exception as e:
+            log(f"   ❌ UDP 443 hatası: {e}")
+            results.append(("UDP 443", False, str(e)))
+        
+        # 5. SSL/TLS Test
+        log("5. SSL/TLS El Sıkışması Test...")
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection((host, 443), timeout=5) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                    log(f"   ✅ SSL/TLS başarılı ({ssock.version()})")
+                    results.append(("SSL/TLS", True, ssock.version()))
+        except ssl.SSLCertVerificationError as e:
+            log(f"   ⚠️ SSL sertifika hatası (şirket proxy'si olabilir): {e}")
+            results.append(("SSL/TLS", "warning", "Sertifika hatası - Şirket SSL inspection olabilir"))
+        except Exception as e:
+            log(f"   ❌ SSL/TLS hatası: {e}")
+            results.append(("SSL/TLS", False, str(e)))
+        
+        # 6. Cloudflare Trace Test
+        log("6. Cloudflare Trace Test...")
+        try:
+            req = urllib.request.Request("https://www.cloudflare.com/cdn-cgi/trace",
+                                         headers={"User-Agent": "FinalSSH-Diagnostic/1.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                trace = resp.read().decode("utf-8", errors="replace")
+                log("   ✅ Cloudflare trace erişilebilir")
+                results.append(("Cloudflare Trace", True, "Erişilebilir"))
+        except urllib.error.HTTPError as e:
+            log(f"   ⚠️ Cloudflare trace HTTP {e.code}")
+            results.append(("Cloudflare Trace", "warning", f"HTTP {e.code}"))
+        except Exception as e:
+            log(f"   ❌ Cloudflare trace hatası: {e}")
+            results.append(("Cloudflare Trace", False, str(e)))
+        
+        # 7. Proxy detection
+        log("7. Proxy Ayarları...")
+        import os
+        proxy_vars = ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']
+        found_proxy = False
+        for var in proxy_vars:
+            val = os.environ.get(var)
+            if val:
+                log(f"   🔧 {var}={val}")
+                found_proxy = True
+                results.append((f"Proxy {var}", True, val))
+        if not found_proxy:
+            log("   ℹ️ Ortam değişkeninde proxy yok")
+            results.append(("Proxy", True, "Yok"))
+        
+        # Summary
+        log("")
+        log("="*50)
+        log("TANILAMA SONUÇLARI:")
+        log("="*50)
+        
+        issues = []
+        for name, status, detail in results:
+            if status is True:
+                log(f"   ✅ {name}: {detail}")
+            elif status == "warning":
+                log(f"   ⚠️ {name}: {detail}")
+                issues.append(f"{name}: {detail}")
+            else:
+                log(f"   ❌ {name}: {detail}")
+                issues.append(f"{name}: {detail}")
+        
+        log("")
+        if issues:
+            log("📋 ÖNERİLER:")
+            log("   • QUIC/UDP engelliysa → 'HTTP/2 zorla' işaretleyin")
+            log("   • SSL hatası varsa → 'TLS doğrulamayı atla' işaretleyin")
+            log("   • Proxy varsa → HTTP/HTTPS Proxy alanlarını doldurun")
+            log("   • Cloudflare domainleri engelliyse → IT'e allowlist isteyin")
+        else:
+            log("✅ Tüm testler başarılı - Bağlantı kurulabilmeli")
+        
+        log("="*50 + "\n")
+        self.events.put(("output", "\n"))
 
     def _ask_host_key(self, hostname, key_type, fingerprint):
         answer = threading.Event()
